@@ -73,3 +73,4 @@ Xem [docs/DEMO.md](docs/DEMO.md) cho kịch bản D1–D5 và [docs/ARCHITECTURE
 - [ ] `nslookup tiktok.com` trả `0.0.0.0` khi nhóm mạng xã hội bị chặn; hết hạn mức → popup đếm ngược 60 giây → về màn hình đăng nhập → đăng nhập lại bị khóa lại ≤5 giây.
 - [ ] Tắt `ogk.exe` (tray) trong Task Manager → service mở lại khay trong ≤10 giây; kill service bằng tài khoản thường bị từ chối, bằng Admin thì tự khởi động lại sau 5 giây.
 - [ ] Gỡ ở Settings → Apps: dịch vụ biến mất, DNS về như cũ (`Get-DnsClientServerAddress`), lối tắt và tường lửa được xóa.
+
