@@ -23,7 +23,25 @@ def test_unauthenticated_redirect_and_api_401(client):
 def test_register_rejects_short_password(client):
     html = client.get("/register").text
     r = client.post("/register", data={"email": "a@b.co", "name": "A", "password": "short", "csrf": pre_token(html)})
-    assert r.status_code == 422 and "10 ký tự" in r.text
+    assert r.status_code == 422 and "8 ký tự" in r.text
+
+
+def test_register_with_short_username_and_no_name(client):
+    html = client.get("/register").text
+    r = client.post("/register", data={"email": "  Tester1 ", "password": "Thu-nghiem8", "csrf": pre_token(html)}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    client.cookies.clear()
+    html = client.get("/login").text
+    r = client.post("/login", data={"email": "tester1", "password": "Thu-nghiem8", "csrf": pre_token(html)}, follow_redirects=False)
+    assert r.status_code == 303
+
+
+@pytest.mark.parametrize("login,pw,msg", [("ab", "Thu-nghiem8", "không hợp lệ"), ("x y@z", "Thu-nghiem8", "không hợp lệ"),
+                                          ("tester2", "12345678", "dễ đoán"), ("tester3", "aaaabbbb", "dễ đoán")])
+def test_register_rejects_bad_login_or_weak_password(client, login, pw, msg):
+    html = client.get("/register").text
+    r = client.post("/register", data={"email": login, "password": pw, "csrf": pre_token(html)})
+    assert r.status_code == 422 and msg in r.text
 
 
 def test_password_is_argon2id(app, parent):

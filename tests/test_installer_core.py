@@ -149,7 +149,7 @@ def test_shared_pc_weak_password_is_a_friendly_error(tmp_path, monkeypatch):
     monkeypatch.delenv("OGK_HOME", raising=False)
     s = FakeSystem(tmp_path, current="Me")
     try:
-        with pytest.raises(InstallError, match="10 ký tự"):
+        with pytest.raises(InstallError, match="8 ký tự"):
             install_shared(s, s.paths, lambda *_: None, "Mẹ", "me@example.com", "ngan", "Bin", 8, "Bin", True)
     finally:
         s.shutdown()

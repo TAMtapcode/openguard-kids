@@ -11,6 +11,7 @@ import requests
 
 from agent.config import VERSION, default_home
 from common.installcode import InstallCodeError, parse_install_code
+from server.security import login_problem, password_problem
 from server.tls import ensure_cert, local_ips
 
 from .pairing import PairingError, authenticate_server, discover, fetch_fingerprint, find_server, normalize_server
@@ -240,6 +241,10 @@ def install_shared(s: System, p: Paths, progress: Progress, parent_name: str, em
     if child_windows_user.strip().lower() == s.current_user().lower():
         raise InstallError("Tài khoản Windows của con không được trùng với tài khoản bạn đang dùng, nếu không bạn sẽ bị giới hạn giờ. "
                            "Hãy tạo thêm một tài khoản Windows cho con (Settings → Accounts → Family & other users).")
+    email = email.strip().lower()
+    problem = login_problem(email) or password_problem(password)
+    if problem:
+        raise InstallError(problem)
     info = install_server(s, p, _scaled(progress, 0, 60))
     progress(62, "Đang tạo tài khoản phụ huynh…")
     resp = _local_setup(p, info["fingerprint"], {"parent_name": parent_name, "email": email, "password": password,

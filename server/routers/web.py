@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import re
 import secrets
 import hmac
 from datetime import datetime, timedelta, timezone
@@ -21,7 +20,7 @@ from common.schema import CATEGORIES
 from .. import charts, services
 from ..deps import SESSION_COOKIE, client_ip, csrf_check, get_db, owned_child, require_role, web_session
 from ..models import AuditLog, Child, ChildRequest, Device, EnrollCode, User, WebSession, now
-from ..security import hash_password, new_enroll_code, new_token, password_problem, sha256hex, verify_password
+from ..security import hash_password, new_enroll_code, login_problem, new_token, password_problem, sha256hex, verify_password
 from .agent_api import services_audit
 
 router = APIRouter()
@@ -131,20 +130,16 @@ def register_page(request: Request):
 
 
 @router.post("/register")
-def register(request: Request, email: str = Form(...), name: str = Form(...), password: str = Form(...), csrf: str = Form(""),
+def register(request: Request, email: str = Form(...), password: str = Form(...), name: str = Form(""), csrf: str = Form(""),
              db: Session = Depends(get_db)):
     _check_pre(request, csrf)
     email = email.strip().lower()
-    err = None
-    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-        err = "Email không hợp lệ."
-    elif password_problem(password):
-        err = password_problem(password)
-    elif db.scalar(select(User.id).where(User.email == email)):
-        err = "Email này đã được đăng ký."
+    err = login_problem(email) or password_problem(password)
+    if not err and db.scalar(select(User.id).where(User.email == email)):
+        err = "Tài khoản này đã được đăng ký."
     if err:
-        return _auth_form(request, "register.html", status=422, error=err)
-    user = User(email=email, display_name=name.strip()[:100], pw_hash=hash_password(password), role="parent")
+        return _auth_form(request, "register.html", status=422, error=err, email=email, display_name=name)
+    user = User(email=email, display_name=(name.strip() or email.split("@")[0])[:100], pw_hash=hash_password(password), role="parent")
     db.add(user)
     db.commit()
     return _start_session(request, db, user, "/")
@@ -213,7 +208,7 @@ def admin_toggle(uid: int, user: User = Depends(require_role("admin")), db: Sess
 
 
 class LocalSetupIn(BaseModel):
-    parent_name: str = Field(min_length=1, max_length=100)
+    parent_name: str = Field(default="", max_length=100)
     email: str = Field(max_length=255)
     password: str = Field(max_length=200)
     child_name: str = Field(min_length=1, max_length=100)
@@ -230,13 +225,13 @@ def local_setup(body: LocalSetupIn, request: Request, db: Session = Depends(get_
     if db.scalar(select(func.count()).select_from(User)):
         raise HTTPException(409, "Máy chủ này đã được thiết lập. Hãy đăng nhập vào bảng điều khiển.")
     email = body.email.strip().lower()
-    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-        raise HTTPException(422, "Email không hợp lệ.")
+    if login_problem(email):
+        raise HTTPException(422, login_problem(email))
     if password_problem(body.password):
         raise HTTPException(422, password_problem(body.password))
     if not body.consent:
         raise HTTPException(422, "Cần xác nhận bạn là cha/mẹ hoặc người giám hộ và đồng ý trước khi cài đặt.")
-    parent = User(email=email, display_name=body.parent_name.strip(), pw_hash=hash_password(body.password), role="parent")
+    parent = User(email=email, display_name=body.parent_name.strip() or email.split("@")[0], pw_hash=hash_password(body.password), role="parent")
     db.add(parent)
     db.flush()
     child = Child(parent_id=parent.id, name=body.child_name.strip(), age=body.child_age)

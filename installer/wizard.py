@@ -202,9 +202,9 @@ class Wizard:
         left.pack(side="left", fill="both", expand=True)
         right.pack(side="left", fill="both", expand=True, padx=(24, 0))
         self.label(left, "Bố/mẹ", 12, True).pack(anchor="w")
-        self.field(left, "Tên của bạn", v["pname"], width=26)
-        self.field(left, "Email (dùng để đăng nhập)", v["email"], width=26)
-        self.field(left, "Mật khẩu (từ 10 ký tự)", v["pw"], show="•", width=26)
+        self.field(left, "Tên của bạn (không bắt buộc)", v["pname"], width=26)
+        self.field(left, "Email hoặc tên đăng nhập", v["email"], width=26)
+        self.field(left, "Mật khẩu (từ 8 ký tự)", v["pw"], show="•", width=26)
         self.label(right, "Con", 12, True).pack(anchor="w")
         self.field(right, "Tên của con", v["cname"], width=26)
         self.field(right, "Tuổi", v["age"], width=8)
@@ -221,7 +221,7 @@ class Wizard:
 
     def refresh_shared(self):
         v = self.sv_
-        ready = all(v[k].get().strip() for k in ("pname", "email", "pw", "cname", "cuser")) and self.ok_var.get()
+        ready = all(v[k].get().strip() for k in ("email", "pw", "cname", "cuser")) and self.ok_var.get()
         if self.nextbtn:
             self.nextbtn.config(state="normal" if ready else "disabled")
 
@@ -314,7 +314,7 @@ class Wizard:
 
     def done_shared(self, info):
         def extra(b):
-            self.label(b, f"Đăng nhập bằng email {info['email']}. Chỉ tài khoản Windows “{info['child_windows_user']}” bị giới hạn giờ.", 10, color=MUTED, wrap=650).pack(anchor="w", pady=(10, 0))
+            self.label(b, f"Đăng nhập bằng {info['email']}. Chỉ tài khoản Windows “{info['child_windows_user']}” bị giới hạn giờ.", 10, color=MUTED, wrap=650).pack(anchor="w", pady=(10, 0))
             self.label(b, BROWSER_NOTE, 9, color=MUTED, wrap=650).pack(anchor="w", pady=(6, 0))
             self.button(b, "Mở bảng điều khiển", lambda: self.s.open_url(info["local_url"])).pack(anchor="w", pady=14)
         self._done("Mọi thứ đã sẵn sàng", [f"Đã cài bảng điều khiển và bảo vệ cho {info['child']} trên máy này.",
