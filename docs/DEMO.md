@@ -15,8 +15,8 @@ pytest tests/test_e2e_demos.py -v -s
 ```
 
 ## Thủ công trên Windows
-1. **D1**: Dashboard → *Luật & lịch* → Ngày thường = 3 phút, bật lịch "Mở cả tuần" → Lưu. Dùng máy 3 phút liên tục (đừng để idle quá 5 phút) → thấy popup "Hết giờ rồi!" đếm ngược 60 giây rồi máy về màn hình đăng nhập.
+1. **D1**: Dashboard → *Luật & lịch* → Ngày thường = 3 phút, bật lịch "Mở cả tuần" → Lưu. Dùng máy 3 phút liên tục (đừng để idle quá 5 phút) → thấy popup "Hết giờ rồi!" đếm ngược 60 giây rồi hiện màn hình khóa toàn màn hình.
 2. **D2**: Lấy SHA-256 của một ứng dụng thử (chọn tệp ngay trên dashboard, mục *Ứng dụng*; hoặc `python -m agent hash C:\...\notepad.exe`) → thêm vào "Ứng dụng chặn" → Lưu. Sao chép `notepad.exe` thành `winword.exe` ở thư mục khác và chạy → cửa sổ đóng ngay, hiện hộp thoại giải thích.
 3. **D3**: Settings → Time & Language → tắt "Set time automatically" → lùi 2 giờ. Hạn mức còn lại vẫn giảm đều; popup "Đồng hồ máy bị chỉnh lệch" hiện; dashboard → Nhật ký/Báo cáo có sự kiện.
 4. **D4**: Rút cáp mạng. Mở `tiktok.com` → vẫn bị chặn. Cắm lại → trong ≤60s trạng thái trên dashboard về "Đang bật", báo cáo không trùng.
-5. **D5**: Bấm "Khóa máy ngay" trên dashboard (điện thoại) và bấm đồng hồ → máy khóa trong vài giây.
+5. **D5**: Bấm "Khóa máy…" → chọn thời gian → "Khóa ngay" trên dashboard (điện thoại) và bấm đồng hồ → màn hình khóa hiện trong vài giây, tự mở khi hết thời gian khóa.

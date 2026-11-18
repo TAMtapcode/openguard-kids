@@ -19,7 +19,7 @@
 - **Service** (LocalSystem) giữ mọi thứ cần quyền: kết thúc tiến trình, DNS proxy, khóa phiên, bí mật thiết bị. Trẻ (User thường) không dừng/sửa được.
 - **Tray** (User) chỉ hiển thị và gửi *telemetry phiên người dùng* (idle, màn hình khóa, tên tiến trình tiền cảnh) cho Service, vì `GetLastInputInfo` và `GetForegroundWindow` chỉ đúng trong phiên của trẻ, Service ở phiên 0 không đọc được.
 - **IPC**: HTTP loopback `127.0.0.1:49152` + header `X-OGK-Token`. Token ngẫu nhiên nằm ở `ProgramData\OpenGuardKids\run` với ACL: *Users chỉ đọc, chỉ SYSTEM/Administrators ghi* nên tiến trình thường không thay được token. IPC chỉ cho phép hành động mức "trẻ" (xin giờ, đổi giờ, xem trạng thái).
-- Khóa máy: Service gọi `WTSDisconnectSession` cho phiên console (LockWorkStation không dùng được từ phiên 0). Nếu trẻ đăng nhập lại khi vẫn hết giờ, bị khóa lại trong ≤5 giây.
+- Khóa máy: KHÔNG ngắt/khóa phiên Windows (bản cũ dùng `WTSDisconnectSession` mỗi 5 giây, có thể làm máy kẹt ở màn hình đăng nhập tới mức phải vào Safe Mode). Khay hiển thị màn hình khóa toàn màn hình trong phiên của trẻ, luôn có nút Đăng xuất/Tắt máy và nút xin thêm giờ; tự đóng khi hết khóa. "Khóa ngay" của bố mẹ luôn có thời hạn (mặc định 60 phút, tối đa 4 giờ) nên máy không bao giờ bị kẹt khóa mãi; thời gian sau màn hình khóa không bị trừ vào hạn mức.
 
 ## 2. Giao thức
 | Phương thức | Đường dẫn | Ghi chú |

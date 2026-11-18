@@ -6,7 +6,7 @@ Hệ thống **đồng hành và quản lý thời gian dùng máy tính của t
 |---|---|---|
 | Máy con: Service nền (LocalSystem) + Tray UI (User) | `agent/` | Python, psutil, dnslib, pywin32, tkinter + pystray |
 | Máy chủ trung tâm + WebSocket lệnh khẩn | `server/` | FastAPI, SQLAlchemy, SQLite WAL (hoặc PostgreSQL) |
-| Bảng điều khiển phụ huynh + trang xem của trẻ | `server/templates`, `server/static` | Jinja2 + JS thuần, responsive, không CDN |
+| Bảng điều khiển phụ huynh + trang xem của trẻ | `web/` | React (Vite), responsive; chạy ngay trên máy bố mẹ hoặc deploy lên Netlify |
 | Dùng chung (lược đồ, chữ ký HMAC) | `common/` | |
 | Bộ phân loại ≥200 tên miền, 6 nhóm + bộ dữ liệu kiểm thử | `data/` | CSV |
 
@@ -70,6 +70,16 @@ Xem [docs/DEMO.md](docs/DEMO.md) cho kịch bản D1–D5 và [docs/ARCHITECTURE
 - [ ] **Máy bố mẹ**: “Cài đặt” chạy hết; dịch vụ `OpenGuardKidsServer` Running; lối tắt “Bảng điều khiển OGK” mở được **không cảnh báo chứng chỉ**; điện thoại cùng Wi-Fi mở được địa chỉ LAN (sau cảnh báo một lần).
 - [ ] **Máy con**: dán mã → tìm thấy máy bố mẹ tự động → cài xong; dịch vụ `OpenGuardKids` Running; đăng nhập tài khoản con thấy biểu tượng lá xanh; “Open Guardian Kids” có trong Settings → Apps.
 - [ ] **Một máy dùng chung**: chỉ tài khoản Windows của con bị tính giờ/khóa; tài khoản bố mẹ không bị ảnh hưởng, kể cả khi con vừa bị khóa.
-- [ ] `nslookup tiktok.com` trả `0.0.0.0` khi nhóm mạng xã hội bị chặn; hết hạn mức → popup đếm ngược 60 giây → về màn hình đăng nhập → đăng nhập lại bị khóa lại ≤5 giây.
+- [ ] `nslookup tiktok.com` trả `0.0.0.0` khi nhóm mạng xã hội bị chặn; hết hạn mức → popup đếm ngược 60 giây → màn hình khóa toàn màn hình (vẫn có nút Đăng xuất/Tắt máy, tự mở khi được cộng giờ).
 - [ ] Tắt `ogk.exe` (tray) trong Task Manager → service mở lại khay trong ≤10 giây; kill service bằng tài khoản thường bị từ chối, bằng Admin thì tự khởi động lại sau 5 giây.
 - [ ] Gỡ ở Settings → Apps: dịch vụ biến mất, DNS về như cũ (`Get-DnsClientServerAddress`), lối tắt và tường lửa được xóa.
+
+
+## Giao diện web (React) và Netlify
+
+- Phát triển: `cd web && npm ci && npm run dev` (chuyển `/api` tới máy chủ OGK, mặc định `https://127.0.0.1:8443`, đổi bằng biến `OGK_API`).
+- Build: `npm run build` → `web/dist`. Máy chủ FastAPI tự phục vụ thư mục này, bộ cài Windows nhúng sẵn.
+- Netlify: kết nối repo, Netlify đọc `netlify.toml` (base `web`, publish `dist`, `VITE_REMOTE=1`). Lần đầu mở trang, bố mẹ nhập địa chỉ máy bố mẹ
+  (ví dụ `192.168.1.10`), mở địa chỉ đó một lần để chấp nhận chứng chỉ, rồi đăng nhập. Trang Netlify gọi API bằng Bearer token, không dùng cookie khác nguồn;
+  máy chủ chỉ cho phép CORS từ `*.netlify.app` (đổi bằng biến môi trường `OGK_CORS_ORIGINS`, là một regex). Dữ liệu vẫn nằm trên máy bố mẹ,
+  nên trình duyệt phải ở cùng mạng với máy đó.

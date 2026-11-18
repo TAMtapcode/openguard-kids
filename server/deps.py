@@ -33,8 +33,16 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
+def _credential(request: Request) -> tuple[str | None, bool]:
+    """(token, qua_bearer). Bearer dành cho giao diện ở tên miền khác (Netlify): không tự gửi kèm như cookie nên không cần CSRF."""
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip() or None, True
+    return request.cookies.get(SESSION_COOKIE), False
+
+
 def _session(request: Request, db: Session):
-    tok = request.cookies.get(SESSION_COOKIE)
+    tok, bearer = _credential(request)
     if not tok:
         return None
     sess = db.get(WebSession, sha256hex(tok))
@@ -43,7 +51,7 @@ def _session(request: Request, db: Session):
     user = db.get(User, sess.user_id)
     if not user or user.disabled:
         return None
-    return user, sess
+    return user, sess, bearer
 
 
 def web_session(request: Request, db: Session = Depends(get_db)):
@@ -55,10 +63,12 @@ def web_session(request: Request, db: Session = Depends(get_db)):
 
 
 def csrf_check(request: Request, db: Session = Depends(get_db)):
-    """Mọi thao tác ghi phải mang X-CSRF-Token (hoặc field csrf) khớp với phiên."""
+    """Phiên cookie: mọi thao tác ghi phải mang X-CSRF-Token khớp với phiên. Phiên Bearer: không áp dụng (không có thông tin tự gửi kèm)."""
     s = _session(request, db)
     if not s:
         raise AuthRedirect()
+    if s[2]:
+        return
     sent = request.headers.get("x-csrf-token", "")
     if not hmac.compare_digest(sent, s[1].csrf):
         raise HTTPException(403, "CSRF token không hợp lệ.")
