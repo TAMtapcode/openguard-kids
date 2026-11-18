@@ -259,3 +259,13 @@ def test_manual_lock_expires_by_itself_so_the_pc_never_stays_stuck(tmp_path):
     assert eng.decision.state == "ok"
     eng.handle_command({"id": 2, "action": "LOCK_NOW"})
     assert abs(float(eng.store.kv_get("manual_lock_until")) - eng.clock.now() - 3600) <= 1   # mặc định 60 phút
+
+
+def test_time_behind_the_lock_screen_does_not_consume_quota(tmp_path):
+    eng, plat, fc = local_engine(tmp_path)
+    plat.fg = "chrome.exe"
+    eng.handle_command({"id": 1, "action": "LOCK_NOW", "minutes": 1})
+    assert 59 <= float(eng.store.kv_get("manual_lock_until")) - eng.clock.now() <= 61   # khóa ngắn giữ đúng thời lượng bố mẹ chọn
+    before = eng.acc.get(eng._parts()[1], "total")
+    ticks(eng, fc, 30)
+    assert eng.decision.state == "locked" and eng.acc.get(eng._parts()[1], "total") == before

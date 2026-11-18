@@ -146,7 +146,7 @@ class Engine:
             ui_ok = self._ui_state()
             self.suspended = (not ui_ok) and self._ui_missing_since is not None and mono - self._ui_missing_since > self.cfg.ui_grace_sec
             dt_local, day = self._parts()
-            active = self._user_active()
+            active = self._user_active() and self.decision.state != "locked"   # màn hình khóa đang che: không trừ giờ
             fg = self._foreground() if active else None
             groups = self._active_groups(active, fg, mono)
             dt = self.acc.tick(day, active, groups)
@@ -351,7 +351,7 @@ class Engine:
                 return True
             _, day = self._parts()
             if act == "LOCK_NOW":
-                mins = max(5, min(int(cmd.get("minutes") or MANUAL_LOCK_MIN), 240))
+                mins = max(1, min(int(cmd.get("minutes") or MANUAL_LOCK_MIN), 240))
                 self.store.kv_set("manual_lock_until", f"{self.clock.now() + mins * 60:.0f}")
                 self.event("locked", "manual")
             elif act == "UNLOCK":
