@@ -8,9 +8,17 @@ Set-Location (Split-Path $PSScriptRoot -Parent)
 & $Python -m pip install -r requirements-server.txt -r requirements-agent.txt pyinstaller
 Remove-Item -Recurse -Force dist, build -ErrorAction SilentlyContinue
 
+# 0) Giao diện web React (cần Node.js 20+): web\dist được nhúng vào máy chủ
+Push-Location web
+npm ci
+if ($LASTEXITCODE -ne 0) { throw "npm ci thất bại." }
+npm run build
+if ($LASTEXITCODE -ne 0) { throw "Build giao diện web thất bại." }
+Pop-Location
+
 # 1) Chương trình chính (dịch vụ + khay + máy chủ + công cụ): một thư mục
 & $Python -m PyInstaller --noconfirm --clean --onedir --windowed --name ogk --paths . `
-  --add-data "data\categories.csv;data" --add-data "server\templates;server\templates" --add-data "server\static;server\static" `
+  --add-data "data\categories.csv;data" --add-data "web\dist;web\dist" `
   --hidden-import win32timezone --hidden-import servicemanager --hidden-import pystray._win32 `
   --collect-submodules uvicorn --collect-submodules websockets --collect-submodules sqlalchemy.dialects `
   scripts\launch_ogk.py

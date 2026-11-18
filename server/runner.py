@@ -1,6 +1,7 @@
 """Chạy server 'tự lo mọi thứ': tạo thư mục dữ liệu, chứng chỉ TLS, khóa mã hóa, và phát hiện trong LAN."""
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 
@@ -12,9 +13,18 @@ from .main import create_app
 from .tls import ensure_cert, local_ips
 
 
+def ensure_std_streams(data_dir: Path):
+    """Windows Service / bản đóng gói --windowed không có console (sys.stdout = None) làm uvicorn lỗi khi cấu hình log."""
+    if sys.stdout is None or sys.stderr is None:
+        log = open(Path(data_dir) / "server.log", "a", encoding="utf-8", buffering=1)
+        sys.stdout = sys.stdout or log
+        sys.stderr = sys.stderr or log
+
+
 def run(data_dir: Path, host="0.0.0.0", port=8443, https=True, stop_event: threading.Event | None = None, discovery_port=None):
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
+    ensure_std_streams(data_dir)
     fp, ssl_kw = None, {}
     if https:
         cert, key, fp = ensure_cert(data_dir / "certs")

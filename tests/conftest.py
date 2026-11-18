@@ -1,4 +1,3 @@
-import re
 import sys
 from pathlib import Path
 
@@ -25,24 +24,15 @@ def client(app):
         yield c
 
 
-def pre_token(html: str) -> str:
-    return re.search(r'name="csrf" value="([^"]+)"', html).group(1)
-
-
-def page_csrf(html: str) -> str:
-    return re.search(r'<meta name="csrf" content="([^"]*)"', html).group(1)
-
-
 class Parent:
     """Trợ giúp thao tác như một phụ huynh trên một TestClient riêng."""
 
     def __init__(self, app, email="me@example.com"):
         self.c = TestClient(app)
         self.c.__enter__()
-        r = self.c.get("/register")
-        r = self.c.post("/register", data={"email": email, "name": "Mẹ Bin", "password": PW, "csrf": pre_token(r.text)})
-        assert r.status_code == 200, r.text[:300]
-        self.csrf = page_csrf(r.text)
+        r = self.c.post("/api/auth/register", json={"login": email, "name": "Mẹ Bin", "password": PW})
+        assert r.status_code == 201, r.text[:300]
+        self.csrf = r.json()["csrf"]
         self.email = email
 
     def h(self):

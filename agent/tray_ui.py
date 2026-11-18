@@ -42,6 +42,7 @@ class TrayApp:
         self.cfg, self.ipc, self.platform = cfg, Ipc(cfg), get_platform()
         self.last_note, self.state, self.win, self.icon = 0, {}, None, None
         self.grace_win = None
+        self.lock_win = None
 
     # ------------------------------------------------------------------ khởi động
     def run(self):
@@ -105,6 +106,7 @@ class TrayApp:
                                                          (f"còn {fmt_min(rem)}" if rem is not None else "không giới hạn"))
         if self.win and self.win.winfo_exists():
             self.update_window()
+        self.sync_lock_screen(s)
         if self.grace_win and self.grace_win.winfo_exists():
             left = s.get("grace_left")
             if s.get("state") != "grace" or left is None:
@@ -154,7 +156,77 @@ class TrayApp:
         self.grace_lbl.pack()
 
     def show_locked(self, n):
-        self.popup(n["title"], f"{n['body']}\n\n{n.get('emergency', '')}", [("Xin thêm giờ", lambda: self.open_window(1))])
+        self.sync_lock_screen(self.state or {"state": "locked", "lock_text": n["body"]})
+
+    # ------------------------------------------------------------------ màn hình khóa (mềm, an toàn)
+    def sync_lock_screen(self, s):
+        """Màn hình khóa toàn màn hình trong phiên của trẻ. KHÔNG khóa/ngắt phiên Windows: luôn có nút Tắt máy/Đăng xuất,
+        tự đóng ngay khi hết khóa (bố mẹ mở khóa, cộng giờ, hết thời hạn khóa tay hoặc sang khung giờ được dùng)."""
+        locked = s.get("state") == "locked" and s.get("applies") is not False
+        alive = self.lock_win is not None and self.lock_win.winfo_exists()
+        if not locked:
+            if alive:
+                self.lock_win.destroy()
+            self.lock_win = None
+            return
+        if not alive:
+            self._build_lock_screen()
+        self.lock_msg.config(text=s.get("lock_text") or "Máy đang tạm khóa.")
+        until = s.get("manual_until")
+        if s.get("reason") == "manual" and until:
+            import time as _t
+            self.lock_sub.config(text=f"Tự mở khóa sau khoảng {max(1, int(until - _t.time()) // 60 + 1)} phút, hoặc khi bố mẹ mở khóa.")
+        else:
+            self.lock_sub.config(text="Máy sẽ tự mở khi bố mẹ cộng thêm giờ hoặc tới khung giờ được dùng.")
+        self.lock_win.lift()
+        self.lock_win.attributes("-topmost", True)
+
+    def _build_lock_screen(self):
+        tk, bg = self.tk, "#16332d"
+        w = self.lock_win = tk.Toplevel(self.root)
+        w.title("Open Guardian Kids · Máy đang tạm khóa")
+        w.configure(bg=bg)
+        w.attributes("-fullscreen", True)
+        w.attributes("-topmost", True)
+        w.protocol("WM_DELETE_WINDOW", lambda: None)
+        box = tk.Frame(w, bg=bg)
+        box.place(relx=0.5, rely=0.45, anchor="center")
+        tk.Label(box, text="🌿", bg=bg, fg="white", font=("Segoe UI Emoji", 48)).pack()
+        tk.Label(box, text="Máy đang tạm khóa", bg=bg, fg="white", font=("Segoe UI", 28, "bold")).pack(pady=(6, 8))
+        self.lock_msg = tk.Label(box, bg=bg, fg="#d7f0e3", font=("Segoe UI", 14), wraplength=640, justify="center")
+        self.lock_msg.pack()
+        self.lock_sub = tk.Label(box, bg=bg, fg="#9fc4b6", font=("Segoe UI", 11), wraplength=640, justify="center")
+        self.lock_sub.pack(pady=(6, 18))
+        tk.Label(box, text="Nhắn cho bố mẹ (không bắt buộc):", bg=bg, fg="white", font=("Segoe UI", 11)).pack()
+        self.lock_note = tk.Entry(box, width=50, font=("Segoe UI", 11))
+        self.lock_note.pack(ipady=4, pady=6)
+        row = tk.Frame(box, bg=bg)
+        row.pack(pady=8)
+        btn = dict(font=("Segoe UI", 11, "bold"), padx=14, pady=6, relief="flat", cursor="hand2")
+        tk.Button(row, text="Xin thêm 15 phút", bg="#2f8f63", fg="white", command=self._lock_request, **btn).pack(side="left", padx=6)
+        tk.Button(row, text="Đăng xuất", bg="white", command=lambda: self.platform_power("logoff"), **btn).pack(side="left", padx=6)
+        tk.Button(row, text="Tắt máy", bg="white", command=lambda: self.platform_power("shutdown"), **btn).pack(side="left", padx=6)
+        self.lock_status = tk.Label(box, bg=bg, fg="#f0b43c", font=("Segoe UI", 11))
+        self.lock_status.pack(pady=4)
+        tk.Label(box, text="Cần giúp đỡ khẩn cấp? Gọi 111 (Tổng đài quốc gia bảo vệ trẻ em) hoặc nhờ người lớn.", bg=bg, fg="#9fc4b6",
+                 font=("Segoe UI", 10)).pack(pady=(14, 0))
+
+    def _lock_request(self):
+        try:
+            code, res = self.ipc.call("POST", "/v1/request", {"kind": "add-time", "subject": "", "minutes": 15,
+                                                             "message": self.lock_note.get().strip()}, timeout=10)
+            msg = res.get("message") or ("Đã gửi cho bố mẹ. Máy sẽ tự mở nếu bố mẹ đồng ý." if code == 200 else res.get("error", "Có lỗi."))
+        except Exception:
+            msg = "Chưa gửi được, em thử lại sau nhé."
+        self.lock_status.config(text=msg)
+
+    def platform_power(self, what):
+        import subprocess
+        args = ["shutdown", "/l"] if what == "logoff" else ["shutdown", "/s", "/t", "0"]
+        try:
+            subprocess.Popen(args, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except OSError:
+            pass
 
     def show_about(self):
         self.popup("Open Guardian Kids làm gì?", ABOUT)

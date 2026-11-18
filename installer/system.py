@@ -24,6 +24,8 @@ class System:
         except (OSError, subprocess.TimeoutExpired) as e:
             return 1, str(e)
 
+    def sleep(self, seconds: float): time.sleep(seconds)
+
     # ---- tệp
     def makedirs(self, p: Path): Path(p).mkdir(parents=True, exist_ok=True)
     def copy_tree(self, src: Path, dst: Path): shutil.copytree(src, dst, dirs_exist_ok=True)

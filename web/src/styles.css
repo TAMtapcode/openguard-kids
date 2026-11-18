@@ -54,3 +54,10 @@ textarea{width:100%;font-family:ui-monospace,Consolas,monospace;font-size:.85rem
 #toast.show{opacity:1}#toast.err{background:var(--berry);color:#fff}
 @media(max-width:560px){.who{display:none}.top .btn{padding:6px 14px;min-height:36px}main{padding:12px 12px 56px}h1{font-size:1.45rem}.kid-head .muted{display:none}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:6px 0 10px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.tabs button{font:inherit;border:0;background:none;color:var(--ink2);padding:6px 12px;border-radius:999px;cursor:pointer;white-space:nowrap}
+.tabs button[aria-selected=true]{background:var(--moss);color:var(--ink);font-weight:600}
+.lockbox{border:1px solid var(--berry);border-radius:var(--r);padding:12px;margin-top:10px;background:color-mix(in srgb,var(--berry) 6%,var(--paper))}
+.lockbox p{margin:.2rem 0 .6rem}.center{display:grid;place-items:center;min-height:50vh}
+.server-chip{font-size:.8rem;color:var(--ink2);background:var(--sky);padding:3px 10px;border-radius:999px;border:0;cursor:pointer}
+.ok{background:#e1f3e8;color:#1f5e3d;padding:10px 12px;border-radius:8px;margin:0}

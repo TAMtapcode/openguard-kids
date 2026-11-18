@@ -54,10 +54,10 @@ def shot(root, name):
     ImageGrab.grab(bbox=(x, y, x + root.winfo_width(), y + root.winfo_height())).save(f"{os.environ['OGK_SHOTS']}/{name}.png")
 
 
-def test_welcome_offers_three_plain_language_choices(root, tmp_path):
+def test_welcome_offers_two_plain_language_choices(root, tmp_path):
     w = Wizard(root, FakeSystem(tmp_path), sync=True)
     t = texts(w)
-    assert "Máy của bố mẹ" in t and "Máy của con" in t and "Cả nhà chỉ có một máy tính" in t and "KHÔNG chụp màn hình" in t
+    assert "Máy của bố mẹ" in t and "Máy của con" in t and "Cả nhà chỉ có một máy tính" not in t and "KHÔNG chụp màn hình" in t
     shot(root, "1_welcome")
 
 
@@ -117,25 +117,6 @@ def test_parent_flow_shows_address_to_open_on_phone(root, tmp_path, monkeypatch)
         t = texts(w)
         assert "Bảng điều khiển đã sẵn sàng" in t and f":{s.paths.port}" in t and "Nâng cao" in t and "Tạo mã cài đặt" in t
         shot(root, "4_done_parent")
-    finally:
-        s.shutdown()
-
-
-def test_shared_page_excludes_parents_own_account_and_installs(root, tmp_path, monkeypatch):
-    monkeypatch.delenv("OGK_HOME", raising=False)
-    s = FakeSystem(tmp_path, current="Me", users=("Me", "Bin"), with_own_exe=True)
-    try:
-        w = Wizard(root, s, s.paths, sync=True)
-        w.show_shared()
-        combo = widgets(w, "TCombobox")[0]
-        assert list(combo["values"]) == ["Bin"] and w.sv_["cuser"].get() == "Bin"           # không đề xuất tài khoản của chính bạn
-        assert str(w.nextbtn["state"]) == "disabled"
-        for k, v in (("pname", "Mẹ Bin"), ("email", "me@example.com"), ("pw", "Mat-khau-du-manh-1"), ("cname", "Bin")):
-            w.sv_[k].set(v)
-        w.ok_var.set(True); w.refresh_shared()
-        shot(root, "7_shared")
-        button(w, "Cài đặt").invoke()
-        assert "Mọi thứ đã sẵn sàng" in texts(w) and "chỉ tài khoản Windows “Bin”" in texts(w).replace("Chỉ", "chỉ")
     finally:
         s.shutdown()
 

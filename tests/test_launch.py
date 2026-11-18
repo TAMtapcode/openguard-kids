@@ -26,3 +26,42 @@ def test_silent_mode_reports_friendly_errors_and_exit_codes(capsys, monkeypatch)
     assert main(["--silent", "--mode", "child", "--code", "ABCD-2345-AAAA-AAAA", "--accept"]) == 1
     assert "quyền quản trị" in capsys.readouterr().err
     assert main(["--silent"]) == 2
+
+
+def test_server_runner_starts_without_console(tmp_path, monkeypatch):
+    """Windows Service và bản --windowed có sys.stdout = None; uvicorn không được sập vì thế."""
+    import socket
+    import threading
+    import time
+
+    import requests
+
+    from server.runner import run
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    stop, errors = threading.Event(), []
+
+    def target():
+        try:
+            run(tmp_path, host="127.0.0.1", port=port, https=False, stop_event=stop, discovery_port=0)
+        except BaseException as e:
+            errors.append(e)
+    t = threading.Thread(target=target, daemon=True)
+    t.start()
+    ok = False
+    for _ in range(100):
+        if errors:
+            break
+        try:
+            ok = requests.get(f"http://127.0.0.1:{port}/healthz", timeout=1).status_code == 200
+            if ok:
+                break
+        except requests.RequestException:
+            time.sleep(0.1)
+    stop.set()
+    t.join(10)
+    assert not errors, errors
+    assert ok

@@ -11,6 +11,7 @@ class FakeSystem(System):
     def __init__(self, tmp: Path, admin=True, current="Me", users=("Me", "Bin"), fail_create=False, with_own_exe=False):
         self.tmp, self.admin, self.current, self.users, self.fail_create = tmp, admin, current, list(users), fail_create
         self.commands: list[list[str]] = []
+        self.running: set[str] = set()
         self.regs: dict = {}
         self.deleted_keys: list = []
         self.deleted_values: list = []
@@ -32,9 +33,16 @@ class FakeSystem(System):
 
     # --- giả lập
     def is_admin(self): return self.admin
+    def sleep(self, seconds): pass
 
     def run(self, args, timeout=90):
         self.commands.append([str(a) for a in args])
+        if args[:2] == ["sc.exe", "query"]:
+            return 0, "STATE : 4 RUNNING" if args[2] in self.running else "STATE : 1 STOPPED"
+        if args[:2] == ["sc.exe", "stop"]:
+            self.running.discard(args[2])
+        if args[:2] == ["sc.exe", "start"]:
+            self.running.add(args[2])
         if args[:2] == ["sc.exe", "create"] and self.fail_create:
             return 5, "Access is denied."
         if args[:3] == ["sc.exe", "start", SERVICE_SERVER]:

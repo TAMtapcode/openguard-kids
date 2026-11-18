@@ -108,11 +108,7 @@ class WindowsPlatform(Platform):
         return [l.strip() for l in out.splitlines() if l.strip() and l.strip().lower() not in ("administrator", "defaultaccount", "wdagutilityaccount", "guest")]
 
     def lock_session(self) -> None:
-        """Service chạy ở phiên 0 nên không gọi LockWorkStation trực tiếp được: ngắt phiên console về màn hình đăng nhập.
-        Ứng dụng của trẻ vẫn chạy nền; khi trẻ đăng nhập lại mà vẫn hết giờ thì bị khóa lại trong vài giây."""
-        sid = self._console_session()
-        if sid is not None:
-            self.wts.WTSDisconnectSession(None, sid, False)
+        """Không ngắt/khóa phiên Windows (từng làm máy kẹt ở màn hình đăng nhập). Màn hình khóa do khay hiển thị trong phiên của trẻ."""
 
     def flush_dns(self) -> None:
         subprocess.run(["ipconfig", "/flushdns"], capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
@@ -172,8 +168,8 @@ class WindowsPlatform(Platform):
             env = win32profile.CreateEnvironmentBlock(token, False)
             si = win32process.STARTUPINFO()
             si.lpDesktop = "winsta0\\default"
-            if getattr(sys, "frozen", False):  # bản đóng gói: ogk-tray.exe nằm ở thư mục anh em của service
-                cmd = f'"{Path(sys.executable).parent.parent / "tray" / "ogk-tray.exe"}"'
+            if getattr(sys, "frozen", False):  # bản đóng gói: cùng ogk.exe với dịch vụ, chạy chế độ tray
+                cmd = f'"{sys.executable}" tray'
             else:
                 cmd = f'"{sys.executable.replace("python.exe", "pythonw.exe")}" -m agent tray'
             win32process.CreateProcessAsUser(token, None, cmd, None, None, False,
@@ -282,11 +278,7 @@ class WindowsPlatform(Platform):
         return [l.strip() for l in out.splitlines() if l.strip() and l.strip().lower() not in ("administrator", "defaultaccount", "wdagutilityaccount", "guest")]
 
     def lock_session(self) -> None:
-        """Service chạy ở phiên 0 nên không gọi LockWorkStation trực tiếp được: ngắt phiên console về màn hình đăng nhập.
-        Ứng dụng của trẻ vẫn chạy nền; khi trẻ đăng nhập lại mà vẫn hết giờ thì bị khóa lại trong vài giây."""
-        sid = self._console_session()
-        if sid is not None:
-            self.wts.WTSDisconnectSession(None, sid, False)
+        """Không ngắt/khóa phiên Windows (từng làm máy kẹt ở màn hình đăng nhập). Màn hình khóa do khay hiển thị trong phiên của trẻ."""
 
     def flush_dns(self) -> None:
         subprocess.run(["ipconfig", "/flushdns"], capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
@@ -346,8 +338,8 @@ class WindowsPlatform(Platform):
             env = win32profile.CreateEnvironmentBlock(token, False)
             si = win32process.STARTUPINFO()
             si.lpDesktop = "winsta0\\default"
-            if getattr(sys, "frozen", False):  # bản đóng gói: ogk-tray.exe nằm ở thư mục anh em của service
-                cmd = f'"{Path(sys.executable).parent.parent / "tray" / "ogk-tray.exe"}"'
+            if getattr(sys, "frozen", False):  # bản đóng gói: cùng ogk.exe với dịch vụ, chạy chế độ tray
+                cmd = f'"{sys.executable}" tray'
             else:
                 cmd = f'"{sys.executable.replace("python.exe", "pythonw.exe")}" -m agent tray'
             win32process.CreateProcessAsUser(token, None, cmd, None, None, False,

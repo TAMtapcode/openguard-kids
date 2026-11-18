@@ -31,8 +31,20 @@ class OGKServerService(win32serviceutil.ServiceFramework):
 
     def SvcDoRun(self):
         servicemanager.LogMsg(servicemanager.EVENTLOG_INFORMATION_TYPE, servicemanager.PYS_SERVICE_STARTED, (self._svc_name_, ""))
-        from server.runner import run
-        run(SERVER_DATA, port=PORT, stop_event=self.stop_evt)
+        try:
+            from server.runner import run
+            run(SERVER_DATA, port=PORT, stop_event=self.stop_evt)
+        except BaseException:
+            import traceback
+            msg = traceback.format_exc()
+            servicemanager.LogErrorMsg(msg)
+            try:
+                SERVER_DATA.mkdir(parents=True, exist_ok=True)
+                with open(SERVER_DATA / "server.log", "a", encoding="utf-8") as f:
+                    f.write(msg)
+            except OSError:
+                pass
+            raise
 
 
 def run_dispatcher():

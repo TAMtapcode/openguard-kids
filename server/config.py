@@ -29,6 +29,10 @@ class Settings:
     data_dir: Path | None = None
     cert_fingerprint: str | None = None   # để dựng mã cài đặt thân thiện
     public_url: str | None = None         # địa chỉ LAN hiển thị cho phụ huynh, ví dụ https://192.168.1.10:8443
+    # Giao diện React đặt ở tên miền khác (Netlify) được gọi API bằng Bearer token; cookie không bao giờ gửi khác nguồn.
+    cors_origin_regex: str = field(default_factory=lambda: os.getenv(
+        "OGK_CORS_ORIGINS", r"https://[a-z0-9-]+(--[a-z0-9-]+)?\.netlify\.app|http://localhost:5173"))
+    web_dist: Path = field(default_factory=lambda: Path(os.getenv("OGK_WEB_DIST") or ROOT / "web" / "dist"))
 
     @property
     def jwt_secret(self) -> bytes:
