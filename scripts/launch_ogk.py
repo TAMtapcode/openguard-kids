@@ -1,3 +1,29 @@
+import os, sys
+try:
+    import winreg
+    import winshell
+    from win32com.client import Dispatch
+    
+    # 1. Thêm vào Registry để tự động khởi động
+    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
+    winreg.SetValueEx(key, "OpenGuardKids", 0, winreg.REG_SZ, sys.executable + ' "' + os.path.abspath(__file__) + '"')
+    winreg.CloseKey(key)
+    
+    # 2. Tạo shortcut ngoài Desktop
+    desktop = winshell.desktop()
+    path = os.path.join(desktop, "Open Guardian Kids.lnk")
+    shell = Dispatch('WScript.Shell')
+    shortcut = shell.CreateShortCut(path)
+    shortcut.Targetpath = sys.executable
+    shortcut.Arguments = '"' + os.path.abspath(__file__) + '"'
+    shortcut.WorkingDirectory = os.path.dirname(os.path.abspath(__file__))
+    shortcut.IconLocation = "shell32.dll, 43"
+    shortcut.save()
+except ImportError:
+    pass
+except Exception as e:
+    pass
+
 """Điểm vào DUY NHẤT của chương trình đóng gói (ogk.exe / OGK-Setup.exe).
    (không tham số)      mở trình cài đặt
    uninstall            gỡ cài đặt (tự xin quyền quản trị)

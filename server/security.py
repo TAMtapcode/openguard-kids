@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 import threading
 import time
@@ -27,12 +28,29 @@ def verify_password(h: str | None, p: str) -> bool:
         return False
 
 
+PW_MIN = 8
+_COMMON_PW = {"12345678", "123456789", "1234567890", "87654321", "11111111", "00000000", "password", "password1", "password123",
+              "qwertyui", "qwerty123", "abc12345", "abcd1234", "1qaz2wsx", "iloveyou", "matkhau1", "matkhau123", "admin123",
+              "12341234", "123123123", "88888888", "66666666", "11223344", "letmein1", "welcome1"}
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,59}$")
+
+
 def password_problem(p: str) -> str | None:
-    if len(p) < 10:
-        return "Mật khẩu cần tối thiểu 10 ký tự."
-    if len(set(p)) < 4:
-        return "Mật khẩu quá đơn giản, hãy dùng nhiều ký tự khác nhau hơn."
+    if len(p) < PW_MIN:
+        return f"Mật khẩu cần tối thiểu {PW_MIN} ký tự."
+    if len(p) > 200:
+        return "Mật khẩu quá dài (tối đa 200 ký tự)."
+    if len(set(p)) < 4 or p.lower() in _COMMON_PW:
+        return "Mật khẩu quá dễ đoán, hãy chọn mật khẩu khác."
     return None
+
+
+def login_problem(login: str) -> str | None:
+    """Tên đăng nhập là email hoặc tên ngắn (chữ thường, số, . _ -), đã chuẩn hóa strip().lower()."""
+    if _EMAIL_RE.match(login) or _USERNAME_RE.match(login):
+        return None
+    return "Email hoặc tên đăng nhập không hợp lệ (tên đăng nhập: 3–60 ký tự chữ, số, dấu . _ -)."
 
 
 class Vault:

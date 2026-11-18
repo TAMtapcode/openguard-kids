@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import socket
 import ssl
@@ -30,20 +31,43 @@ def normalize_server(text: str) -> tuple[str, str, int]:
     return u.scheme, u.hostname, u.port or DEFAULT_PORT
 
 
-def discover(timeout: float = 2.0, port: int = DISCOVERY_PORT, targets=None) -> list[dict]:
+def broadcast_addresses() -> list[str]:
+    """Địa chỉ broadcast của từng card mạng: Windows chỉ gửi 255.255.255.255 ra MỘT card (có thể là card ảo VPN/Hyper-V)."""
+    try:
+        import psutil
+        addrs = psutil.net_if_addrs()
+    except Exception:
+        return []
+    out = []
+    for nics in addrs.values():
+        for a in nics:
+            if a.family != socket.AF_INET or not a.netmask:
+                continue
+            try:
+                net = ipaddress.IPv4Network(f"{a.address}/{a.netmask}", strict=False)
+            except ValueError:
+                continue
+            if net.prefixlen < 31 and not net.is_loopback and not net.is_link_local:
+                out.append(str(net.broadcast_address))
+    return list(dict.fromkeys(out))
+
+
+def discover(timeout: float = 3.0, port: int = DISCOVERY_PORT, targets=None) -> list[dict]:
     """Hỏi cả mạng LAN: 'có máy chủ OGK nào không?'. Trả danh sách {name, url} (rỗng nếu không thấy)."""
-    targets = targets or [("255.255.255.255", port), ("127.0.0.1", port)]
+    targets = targets or [(a, port) for a in ("255.255.255.255", *broadcast_addresses(), "127.0.0.1")]
     found: dict[str, dict] = {}
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         s.settimeout(0.3)
-        for t in targets:
-            try:
-                s.sendto(MAGIC, t)
-            except OSError:
-                pass
-        end = time.monotonic() + timeout
+        end, next_send = time.monotonic() + timeout, 0.0
         while time.monotonic() < end:
+            if time.monotonic() >= next_send:          # gửi lại vài lần: gói UDP qua Wi-Fi dễ bị rơi
+                for t in targets:
+                    try:
+                        s.sendto(MAGIC, t)
+                    except OSError:
+                        pass
+                next_send = time.monotonic() + 0.8
             try:
                 data, _ = s.recvfrom(1024)
                 m = json.loads(data)
@@ -82,11 +106,15 @@ def authenticate_server(scheme: str, host: str, port: int, check: str | None, al
 
 
 def find_server(check: str | None, candidates: list[dict], allow_insecure: bool = False):
-    """Thử lần lượt các máy tìm thấy, chọn máy nào khớp mã. Trả (url, fingerprint) hoặc None."""
+    """Thử lần lượt các máy tìm thấy, chọn máy nào khớp mã. Trả (url, fingerprint); None nếu không máy nào trả lời;
+    ném PairingError của máy cuối cùng nếu có máy trả lời nhưng không khớp/không kết nối được (để báo đúng nguyên nhân)."""
+    last = None
     for c in candidates:
         try:
             scheme, host, port = normalize_server(c["url"])
             return c["url"], authenticate_server(scheme, host, port, check, allow_insecure)
-        except PairingError:
-            continue
+        except PairingError as e:
+            last = e
+    if last:
+        raise last
     return None

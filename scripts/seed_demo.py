@@ -1,7 +1,6 @@
 """Nạp dữ liệu mẫu vào server đang chạy để xem thử dashboard (chỉ dùng miền công khai, an toàn).
    python scripts/seed_demo.py --server http://127.0.0.1:8000"""
 import argparse
-import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -16,13 +15,11 @@ def main():
     ap.add_argument("--server", default="http://127.0.0.1:8000")
     a = ap.parse_args()
     s, base = requests.Session(), a.server.rstrip("/")
-    tok = re.search(r'name="csrf" value="([^"]+)"', s.get(f"{base}/register").text).group(1)
-    r = s.post(f"{base}/register", data={"email": "demo@example.com", "name": "Mẹ của Bin", "password": PW, "csrf": tok})
-    if "đã được đăng ký" in r.text:
-        tok = re.search(r'name="csrf" value="([^"]+)"', s.get(f"{base}/login").text).group(1)
-        r = s.post(f"{base}/login", data={"email": "demo@example.com", "password": PW, "csrf": tok})
-    csrf = re.search(r'<meta name="csrf" content="([^"]*)"', r.text).group(1)
-    h = {"X-CSRF-Token": csrf}
+    r = s.post(f"{base}/api/auth/register", json={"login": "demo@example.com", "name": "Mẹ của Bin", "password": PW})
+    if r.status_code == 422 and "đã được đăng ký" in r.text:
+        r = s.post(f"{base}/api/auth/login", json={"login": "demo@example.com", "password": PW})
+    r.raise_for_status()
+    h = {"X-CSRF-Token": r.json()["csrf"]}
     cid = s.post(f"{base}/api/parent/children", json={"name": "Bin", "age": 9}, headers=h).json()["id"]
     code = s.post(f"{base}/api/parent/children/{cid}/enroll-code?consent=true", headers=h).json()["code"]
     d = requests.post(f"{base}/api/v1/enrollment", json={"code": code, "fingerprint": "demo", "device_name": "PC-phòng-học", "agent_version": "1.0.0"}).json()

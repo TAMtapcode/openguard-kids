@@ -7,7 +7,6 @@ Bạn **không cần biết kỹ thuật**. Cả quá trình khoảng 5 phút v�
 - Bạn có quyền quản trị (Administrator) trên cả hai máy. Windows sẽ hỏi “Bạn có cho phép…?”, hãy bấm **Yes**.
 - Tài khoản Windows của con nên là loại **thường (Standard)**, không phải Administrator, để con không tự tắt được ứng dụng.
 
-> **Nhà chỉ có một máy tính?** Bố mẹ và con đăng nhập hai tài khoản Windows khác nhau? Bỏ qua Bước 1 và 3, dùng **“Cả nhà chỉ có một máy tính”** ở trình cài đặt. Điền thông tin một lần là xong.
 
 ---
 
@@ -16,7 +15,7 @@ Bạn **không cần biết kỹ thuật**. Cả quá trình khoảng 5 phút v�
 2. Đợi khoảng một phút. Xong sẽ có nút **“Mở bảng điều khiển”**, và lối tắt **“Bảng điều khiển OGK”** ngoài màn hình nền.
 
 ## Bước 2. Tạo tài khoản và hồ sơ của con
-1. Bấm **“Mở bảng điều khiển”** → **Đăng ký** (email + mật khẩu từ 10 ký tự).
+1. Bấm **“Mở bảng điều khiển”** → **Đăng ký** (email hoặc tên đăng nhập + mật khẩu từ 8 ký tự).
 2. Ở khung **Thêm hồ sơ cho con**, nhập tên và tuổi → **Thêm con**.
 3. Bấm **“Luật, báo cáo và yêu cầu”** của con → cuộn tới mục **“Thêm máy tính của con”**.
 4. Tích ô đồng ý → bấm **“Tạo mã cài đặt”** → bấm **“Sao chép”**. Mã có dạng `ABCD-2345-XXXX-XXXX`, dùng một lần, có hiệu lực 10 phút.

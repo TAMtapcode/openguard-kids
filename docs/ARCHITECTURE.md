@@ -19,7 +19,7 @@
 - **Service** (LocalSystem) giữ mọi thứ cần quyền: kết thúc tiến trình, DNS proxy, khóa phiên, bí mật thiết bị. Trẻ (User thường) không dừng/sửa được.
 - **Tray** (User) chỉ hiển thị và gửi *telemetry phiên người dùng* (idle, màn hình khóa, tên tiến trình tiền cảnh) cho Service, vì `GetLastInputInfo` và `GetForegroundWindow` chỉ đúng trong phiên của trẻ, Service ở phiên 0 không đọc được.
 - **IPC**: HTTP loopback `127.0.0.1:49152` + header `X-OGK-Token`. Token ngẫu nhiên nằm ở `ProgramData\OpenGuardKids\run` với ACL: *Users chỉ đọc, chỉ SYSTEM/Administrators ghi* nên tiến trình thường không thay được token. IPC chỉ cho phép hành động mức "trẻ" (xin giờ, đổi giờ, xem trạng thái).
-- Khóa máy: Service gọi `WTSDisconnectSession` cho phiên console (LockWorkStation không dùng được từ phiên 0). Nếu trẻ đăng nhập lại khi vẫn hết giờ, bị khóa lại trong ≤5 giây.
+- Khóa máy: KHÔNG ngắt/khóa phiên Windows (bản cũ dùng `WTSDisconnectSession` mỗi 5 giây, có thể làm máy kẹt ở màn hình đăng nhập tới mức phải vào Safe Mode). Khay hiển thị màn hình khóa toàn màn hình trong phiên của trẻ, luôn có nút Đăng xuất/Tắt máy và nút xin thêm giờ; tự đóng khi hết khóa. "Khóa ngay" của bố mẹ luôn có thời hạn (mặc định 60 phút, tối đa 4 giờ) nên máy không bao giờ bị kẹt khóa mãi; thời gian sau màn hình khóa không bị trừ vào hạn mức.
 
 ## 2. Giao thức
 | Phương thức | Đường dẫn | Ghi chú |
@@ -72,7 +72,7 @@ Lệnh được lưu bền (`commands`); nếu WS không sẵn sàng thì giao q
 Mục tiêu: người không rành kỹ thuật cài được trong 5 phút, **không cần gõ lệnh, không cần biết chứng chỉ/IP/mã ghim**.
 
 - **Một tệp**: `OGK-Setup.exe` (PyInstaller `--onefile --uac-admin`) nhúng sẵn `ogk.exe` (dịch vụ + khay + máy chủ + công cụ). Mọi chương trình đóng gói đi qua một điểm vào `scripts/launch_ogk.py` (`agent-service`, `server-service`, `tray`, `uninstall`, `agent …`).
-- **Ba chế độ**: máy bố mẹ (máy chủ + bảng điều khiển), máy con (agent), một máy dùng chung (cả hai, gọi `POST /api/setup/local`, chỉ nhận từ loopback và chỉ khi CSDL chưa có tài khoản). Máy dùng chung dùng `monitored_users`: chỉ tài khoản Windows của con bị tính giờ/chặn, tài khoản bố mẹ không bị ảnh hưởng.
+- **Hai chế độ**: máy bố mẹ (máy chủ + bảng điều khiển), máy con (agent). Máy con có thể dùng `monitored_users` (mục “Nâng cao”) để chỉ tính giờ/chặn tài khoản Windows của con.
 - **Mã cài đặt 16 ký tự** `ABCD-2345-XXXX-XXXX` = mã ghép đôi 8 ký tự (đúng như API) + 8 ký tự là 40 bit đầu của SHA-256 chứng chỉ máy chủ. Máy con *tự lấy* chứng chỉ từ địa chỉ đã tìm thấy, đối chiếu với 8 ký tự cuối rồi mới ghim và gửi mã ghép đôi. Kẻ giả mạo phải tạo chứng chỉ trùng 40 bit (~10¹² lần thử) trong 10 phút hiệu lực nên không khả thi, và mã ghép đôi không bao giờ gửi cho máy chưa được xác thực.
 - **Tự tìm máy chủ**: máy chủ trả lời gói UDP broadcast `OGK-DISCOVER/1` ở cổng 48600 bằng `{tên máy, url}` (không có bí mật). Người dùng chỉ cần nhập mã. Có “Nâng cao” để nhập địa chỉ tay.
 - **Tự động hoá**: sinh chứng chỉ (một lần, giữ nguyên để mã ghim không đổi), tin cậy chứng chỉ trên máy bố mẹ (`certutil`), mở tường lửa chỉ ở profile *Private* (TCP 8443, UDP 48600), đăng ký dịch vụ tự khởi động + tự khởi động lại, lối tắt, mục trong *Apps & features*, chép bộ cài vào `downloads/` để phụ huynh tải về máy con từ bảng điều khiển.

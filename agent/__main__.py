@@ -1,3 +1,13 @@
+
+import ctypes, sys
+try:
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "OGK_Agent_Single_Instance")
+    if ctypes.windll.kernel32.GetLastError() == 183: # ERROR_ALREADY_EXISTS
+        print("Hệ thống OGK Agent đã chạy ngầm, từ chối bật đè.")
+        sys.exit(0)
+except:
+    pass
+
 """python -m agent <lệnh>
    enroll  --server URL --pin SHA256 --code ABCD2345   Ghép đôi (chạy bằng quyền Administrator)
    run     [--dev]                                     Chạy ở chế độ console (phát triển / chẩn đoán)

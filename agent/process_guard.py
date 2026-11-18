@@ -11,7 +11,7 @@ import psutil
 
 PROTECTED_NAMES = frozenset({
     "system", "registry", "smss.exe", "csrss.exe", "wininit.exe", "services.exe", "lsass.exe", "winlogon.exe",
-    "svchost.exe", "explorer.exe", "dwm.exe", "fontdrvhost.exe", "ogk-service.exe", "ogk-tray.exe", "systemd", "init",
+    "svchost.exe", "explorer.exe", "dwm.exe", "fontdrvhost.exe", "ogk.exe", "ogk-service.exe", "ogk-tray.exe", "systemd", "init",
 })
 MAX_HASH_BYTES = 1 << 30
 _SYSTEM_ROOTS = [r.lower() for r in (os.environ.get("SystemRoot"), os.environ.get("windir")) if r]

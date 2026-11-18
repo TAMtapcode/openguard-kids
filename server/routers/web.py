@@ -1,40 +1,29 @@
-"""Trang web: đăng nhập/đăng ký, dashboard phụ huynh, trang xem của trẻ, quản trị."""
+"""API JSON cho giao diện web React: đăng nhập/đăng ký, dữ liệu trang phụ huynh, trang của trẻ, quản trị.
+Phiên = cookie HttpOnly (khi giao diện chạy cùng máy chủ) hoặc Bearer token (khi giao diện chạy trên Netlify)."""
 from __future__ import annotations
 
 import json
-import re
-import secrets
-import hmac
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from common.installcode import make_install_code
 from common.schema import CATEGORIES
 
-from .. import charts, services
+from .. import services
 from ..deps import SESSION_COOKIE, client_ip, csrf_check, get_db, owned_child, require_role, web_session
 from ..models import AuditLog, Child, ChildRequest, Device, EnrollCode, User, WebSession, now
-from ..security import hash_password, new_enroll_code, new_token, password_problem, sha256hex, verify_password
-from .agent_api import services_audit
+from ..security import hash_password, new_enroll_code, login_problem, new_token, password_problem, sha256hex, verify_password
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
-VN = timezone(timedelta(hours=7))
-templates.env.filters["dur"] = charts.fmt_duration
-templates.env.filters["dt"] = lambda ts: datetime.fromtimestamp(ts, VN).strftime("%d/%m/%Y %H:%M") if ts else "—"
 ACTION_VI = {"policy_change": "Đổi luật", "child_created": "Thêm hồ sơ con", "consent_and_enroll_code": "Đồng ý & tạo mã ghép đôi",
              "device_enrolled": "Ghép đôi thiết bị", "device_revoked": "Gỡ thiết bị", "request_decided": "Phản hồi yêu cầu của con",
              "wipe_child_data": "Xóa toàn bộ dữ liệu hoạt động", "viewer_created": "Tạo tài khoản xem cho con",
              "command_LOCK_NOW": "Khóa máy ngay", "command_UNLOCK": "Mở khóa", "command_ADD_TIME": "Cộng thêm giờ", "login_locked": "Khóa tài khoản tạm thời"}
-templates.env.filters["action_vi"] = lambda a: ACTION_VI.get(a, a)
-templates.env.globals["CATEGORIES"] = CATEGORIES
 
 
 def event_vi(e) -> str:
@@ -52,66 +41,47 @@ def event_vi(e) -> str:
     return "Con gửi yêu cầu" + (f": {sub}" if sub else "")
 
 
-templates.env.filters["event_vi"] = event_vi
+
+def _json_only(request: Request):
+    """Chỉ nhận JSON: biểu mẫu HTML của trang lạ không gửi được, còn fetch khác nguồn phải qua CORS preflight."""
+    if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
+        raise HTTPException(415, "Cần gửi JSON.")
 
 
-def render(request: Request, name: str, status: int = 200, **ctx):
-    sess = getattr(request.state, "session", None)
-    return templates.TemplateResponse(request, name, {"csrf": sess.csrf if sess else "", **ctx}, status_code=status)
+class AuthIn(BaseModel):
+    login: str = Field(max_length=255)
+    password: str = Field(max_length=200)
+    name: str = Field(default="", max_length=100)
+    token: bool = False      # True: trả Bearer token (giao diện ở tên miền khác, ví dụ Netlify) thay cho cookie
 
 
-def _pre_csrf_cookie(resp, request: Request, token: str):
-    resp.set_cookie("ogk_pre", token, httponly=True, samesite="lax", secure=request.app.state.settings.cookie_secure, max_age=1800)
+def user_json(u: User) -> dict:
+    return {"id": u.id, "login": u.email, "display_name": u.display_name or u.email, "role": u.role, "child_id": u.child_id}
 
 
-def _auth_form(request: Request, name: str, **ctx):
-    token = secrets.token_urlsafe(24)
-    resp = render(request, name, pre=token, **ctx)
-    _pre_csrf_cookie(resp, request, token)
-    return resp
-
-
-def _check_pre(request: Request, csrf: str):
-    if not hmac.compare_digest(request.cookies.get("ogk_pre", "x"), csrf or "y"):
-        raise HTTPException(403, "Phiên biểu mẫu hết hạn, hãy tải lại trang.")
-
-
-def _home_for(user: User) -> str:
-    return {"parent": "/", "child_view": "/kid", "admin": "/admin"}[user.role]
-
-
-def _start_session(request: Request, db: Session, user: User, target: str):
+def _start_session(request: Request, db: Session, user: User, want_token: bool, status: int = 200):
     s = request.app.state.settings
-    tok = new_token(32)
-    db.add(WebSession(token_hash=sha256hex(tok), user_id=user.id, csrf=new_token(24), created_at=now(),
-                      expires_at=now() + s.session_hours * 3600))
+    tok, csrf = new_token(32), new_token(24)
+    db.add(WebSession(token_hash=sha256hex(tok), user_id=user.id, csrf=csrf, created_at=now(), expires_at=now() + s.session_hours * 3600))
     db.commit()
-    resp = RedirectResponse(target, status_code=303)
-    resp.set_cookie(SESSION_COOKIE, tok, httponly=True, secure=s.cookie_secure, samesite="lax", max_age=s.session_hours * 3600)
-    resp.delete_cookie("ogk_pre")
+    body = {"user": user_json(user), "csrf": csrf}
+    if want_token:
+        body["token"] = tok
+    resp = JSONResponse(body, status_code=status)
+    if not want_token:
+        resp.set_cookie(SESSION_COOKIE, tok, httponly=True, secure=s.cookie_secure, samesite="lax", max_age=s.session_hours * 3600)
     return resp
 
 
-@router.get("/privacy", response_class=HTMLResponse)
-def privacy_page(request: Request):
-    return render(request, "privacy.html", user=None)
-
-
-@router.get("/login", response_class=HTMLResponse)
-def login_page(request: Request):
-    return _auth_form(request, "login.html", error=None)
-
-
-@router.post("/login")
-def login(request: Request, email: str = Form(...), password: str = Form(...), csrf: str = Form(""), db: Session = Depends(get_db)):
-    _check_pre(request, csrf)
+@router.post("/api/auth/login", dependencies=[Depends(_json_only)])
+def login(body: AuthIn, request: Request, db: Session = Depends(get_db)):
     ip = client_ip(request)
-    generic = "Email hoặc mật khẩu không đúng, hoặc tài khoản đang bị khóa tạm thời."
+    generic = "Tài khoản hoặc mật khẩu không đúng, hoặc tài khoản đang bị khóa tạm thời."
     if not request.app.state.rl_login.allow(ip):
-        return _auth_form(request, "login.html", status=429, error="Quá nhiều lần thử từ địa chỉ này. Vui lòng đợi một phút.")
-    user = db.scalar(select(User).where(User.email == email.strip().lower()))
+        raise HTTPException(429, "Quá nhiều lần thử từ địa chỉ này. Vui lòng đợi một phút.")
+    user = db.scalar(select(User).where(User.email == body.login.strip().lower()))
     locked = bool(user and user.locked_until > now())
-    ok = verify_password(user.pw_hash if user else None, password) and user is not None and not locked and not user.disabled
+    ok = verify_password(user.pw_hash if user else None, body.password) and user is not None and not locked and not user.disabled
     if not ok:
         if user and not locked:
             user.failed_attempts += 1
@@ -120,86 +90,87 @@ def login(request: Request, email: str = Form(...), password: str = Form(...), c
                 user.failed_attempts = 0
                 services.audit(db, user.email, ip, None, "login_locked", "account", "", "khóa 15 phút")
             db.commit()
-        return _auth_form(request, "login.html", status=401, error=generic)
+        raise HTTPException(401, generic)
     user.failed_attempts = 0
-    return _start_session(request, db, user, _home_for(user))
+    return _start_session(request, db, user, body.token)
 
 
-@router.get("/register", response_class=HTMLResponse)
-def register_page(request: Request):
-    return _auth_form(request, "register.html", error=None)
-
-
-@router.post("/register")
-def register(request: Request, email: str = Form(...), name: str = Form(...), password: str = Form(...), csrf: str = Form(""),
-             db: Session = Depends(get_db)):
-    _check_pre(request, csrf)
-    email = email.strip().lower()
-    err = None
-    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-        err = "Email không hợp lệ."
-    elif password_problem(password):
-        err = password_problem(password)
-    elif db.scalar(select(User.id).where(User.email == email)):
-        err = "Email này đã được đăng ký."
+@router.post("/api/auth/register", dependencies=[Depends(_json_only)])
+def register(body: AuthIn, request: Request, db: Session = Depends(get_db)):
+    if not request.app.state.rl_login.allow(client_ip(request)):
+        raise HTTPException(429, "Quá nhiều lần thử từ địa chỉ này. Vui lòng đợi một phút.")
+    login_ = body.login.strip().lower()
+    err = login_problem(login_) or password_problem(body.password)
+    if not err and db.scalar(select(User.id).where(User.email == login_)):
+        err = "Tài khoản này đã được đăng ký."
     if err:
-        return _auth_form(request, "register.html", status=422, error=err)
-    user = User(email=email, display_name=name.strip()[:100], pw_hash=hash_password(password), role="parent")
+        raise HTTPException(422, err)
+    user = User(email=login_, display_name=(body.name.strip() or login_.split("@")[0])[:100], pw_hash=hash_password(body.password), role="parent")
     db.add(user)
     db.commit()
-    return _start_session(request, db, user, "/")
+    return _start_session(request, db, user, body.token, status=201)
 
 
-@router.post("/logout", dependencies=[Depends(csrf_check)])
-def logout(request: Request, db: Session = Depends(get_db)):
-    tok = request.cookies.get(SESSION_COOKIE)
-    if tok:
-        s = db.get(WebSession, sha256hex(tok))
-        if s:
-            db.delete(s)  # hủy phiên phía máy chủ
-            db.commit()
+@router.get("/api/auth/me")
+def me(request: Request, user: User = Depends(web_session)):
+    return {"user": user_json(user), "csrf": request.state.session.csrf}
+
+
+@router.post("/api/auth/logout", dependencies=[Depends(csrf_check)])
+def logout(request: Request, user: User = Depends(web_session), db: Session = Depends(get_db)):
+    s = db.get(WebSession, request.state.session.token_hash)
+    if s:
+        db.delete(s)  # hủy phiên phía máy chủ
+        db.commit()
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(SESSION_COOKIE)
     return resp
 
 
-@router.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, user: User = Depends(web_session)):
-    if user.role != "parent":
-        return RedirectResponse(_home_for(user), status_code=303)
-    return render(request, "dashboard.html", user=user)
+def _req_json(r: ChildRequest) -> dict:
+    return {"id": r.id, "kind": r.kind, "subject": r.subject, "minutes": r.minutes, "message": r.message or "", "status": r.status,
+            "response": r.response or "", "created_at": r.created_at}
 
 
-@router.get("/child/{cid}", response_class=HTMLResponse)
-def child_page(cid: int, request: Request, user: User = Depends(require_role("parent")), db: Session = Depends(get_db)):
+def _audit_json(a: AuditLog, with_ip: bool) -> dict:
+    d = {"id": a.id, "ts": a.ts, "actor": a.actor, "action": ACTION_VI.get(a.action, a.action), "field": a.field or "",
+         "old": a.old_value or "", "new": a.new_value or ""}
+    if with_ip:
+        d["ip"] = a.actor_ip
+    return d
+
+
+@router.get("/api/parent/children/{cid}/overview")
+def child_overview(cid: int, request: Request, user: User = Depends(require_role("parent")), db: Session = Depends(get_db)):
     child = owned_child(db, user, cid)
     row = services.get_policy_row(db, child)
     db.commit()
-    rep = services.child_report(db, child.id)
-    reqs = list(db.scalars(select(ChildRequest).where(ChildRequest.child_id == child.id).order_by(ChildRequest.id.desc()).limit(30)))
-    audit = list(db.scalars(select(AuditLog).where(AuditLog.child_id == child.id).order_by(AuditLog.id.desc()).limit(100)))
-    devs = list(db.scalars(select(Device).where(Device.child_id == child.id)))
-    return render(request, "child.html", user=user, child=child, policy=json.loads(row.doc), version=row.version, report=rep,
-                  chart=charts.bar_chart(rep["usage"]), requests=reqs, audit=audit, devices=devs, days=services.DAYS_VI,
-                  recent=services.recent_events(db, child.id), lan_url=request.app.state.settings.public_url or str(request.base_url).rstrip("/"))
+    reqs = db.scalars(select(ChildRequest).where(ChildRequest.child_id == child.id).order_by(ChildRequest.id.desc()).limit(30))
+    audit = db.scalars(select(AuditLog).where(AuditLog.child_id == child.id).order_by(AuditLog.id.desc()).limit(100))
+    devs = db.scalars(select(Device).where(Device.child_id == child.id))
+    return {"child": {"id": child.id, "name": child.name, "age": child.age}, "policy": json.loads(row.doc), "version": row.version,
+            "report": services.child_report(db, child.id), "requests": [_req_json(r) for r in reqs],
+            "audit": [_audit_json(a, True) for a in audit],
+            "devices": [{"id": d.id, "name": d.name, "status": d.status, "enrolled_at": d.enrolled_at} for d in devs],
+            "recent": [{"ts": e.ts, "text": event_vi(e)} for e in services.recent_events(db, child.id)],
+            "categories": CATEGORIES, "lan_url": request.app.state.settings.public_url or str(request.base_url).rstrip("/")}
 
 
-@router.get("/kid", response_class=HTMLResponse)
-def kid_page(request: Request, user: User = Depends(require_role("child_view")), db: Session = Depends(get_db)):
+@router.get("/api/kid/overview")
+def kid_overview(user: User = Depends(require_role("child_view")), db: Session = Depends(get_db)):
     child = owned_child(db, user, user.child_id or -1)
-    rep = services.child_report(db, child.id)
-    audit = list(db.scalars(select(AuditLog).where(AuditLog.child_id == child.id, AuditLog.action.in_(
-        ("policy_change", "request_decided", "command_ADD_TIME", "command_LOCK_NOW", "command_UNLOCK"))).order_by(AuditLog.id.desc()).limit(50)))
-    reqs = list(db.scalars(select(ChildRequest).where(ChildRequest.child_id == child.id).order_by(ChildRequest.id.desc()).limit(10)))
-    return render(request, "kid.html", user=user, child=child, report=rep, chart=charts.bar_chart(rep["usage"]), audit=audit,
-                  requests=reqs, today=rep["usage"][-1]["seconds"])
+    audit = db.scalars(select(AuditLog).where(AuditLog.child_id == child.id, AuditLog.action.in_(
+        ("policy_change", "request_decided", "command_ADD_TIME", "command_LOCK_NOW", "command_UNLOCK"))).order_by(AuditLog.id.desc()).limit(50))
+    reqs = db.scalars(select(ChildRequest).where(ChildRequest.child_id == child.id).order_by(ChildRequest.id.desc()).limit(10))
+    return {"child": {"id": child.id, "name": child.name}, "report": services.child_report(db, child.id),
+            "audit": [_audit_json(a, False) for a in audit], "requests": [_req_json(r) for r in reqs]}
 
 
-@router.get("/admin", response_class=HTMLResponse)
-def admin_page(request: Request, user: User = Depends(require_role("admin")), db: Session = Depends(get_db)):
-    users = list(db.scalars(select(User).order_by(User.id)))
-    stats = {"children": db.scalar(select(func.count()).select_from(Child)), "devices": db.scalar(select(func.count()).select_from(Device))}
-    return render(request, "admin.html", user=user, users=users, stats=stats)
+@router.get("/api/admin/overview")
+def admin_overview(user: User = Depends(require_role("admin")), db: Session = Depends(get_db)):
+    users = db.scalars(select(User).order_by(User.id))
+    return {"users": [{**user_json(u), "disabled": u.disabled} for u in users],
+            "stats": {"children": db.scalar(select(func.count()).select_from(Child)), "devices": db.scalar(select(func.count()).select_from(Device))}}
 
 
 @router.post("/api/admin/users/{uid}/toggle", dependencies=[Depends(csrf_check)])
@@ -213,7 +184,7 @@ def admin_toggle(uid: int, user: User = Depends(require_role("admin")), db: Sess
 
 
 class LocalSetupIn(BaseModel):
-    parent_name: str = Field(min_length=1, max_length=100)
+    parent_name: str = Field(default="", max_length=100)
     email: str = Field(max_length=255)
     password: str = Field(max_length=200)
     child_name: str = Field(min_length=1, max_length=100)
@@ -230,13 +201,13 @@ def local_setup(body: LocalSetupIn, request: Request, db: Session = Depends(get_
     if db.scalar(select(func.count()).select_from(User)):
         raise HTTPException(409, "Máy chủ này đã được thiết lập. Hãy đăng nhập vào bảng điều khiển.")
     email = body.email.strip().lower()
-    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-        raise HTTPException(422, "Email không hợp lệ.")
+    if login_problem(email):
+        raise HTTPException(422, login_problem(email))
     if password_problem(body.password):
         raise HTTPException(422, password_problem(body.password))
     if not body.consent:
         raise HTTPException(422, "Cần xác nhận bạn là cha/mẹ hoặc người giám hộ và đồng ý trước khi cài đặt.")
-    parent = User(email=email, display_name=body.parent_name.strip(), pw_hash=hash_password(body.password), role="parent")
+    parent = User(email=email, display_name=body.parent_name.strip() or email.split("@")[0], pw_hash=hash_password(body.password), role="parent")
     db.add(parent)
     db.flush()
     child = Child(parent_id=parent.id, name=body.child_name.strip(), age=body.child_age)

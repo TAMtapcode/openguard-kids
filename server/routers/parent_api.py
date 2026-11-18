@@ -25,7 +25,7 @@ class ChildIn(BaseModel):
 
 class CommandIn(BaseModel):
     action: str
-    minutes: int = Field(default=15, ge=1, le=240)
+    minutes: int = Field(default=15, ge=1, le=240)   # ADD_TIME: số phút cộng thêm; LOCK_NOW: khóa trong bao lâu (tự mở)
     device_id: str | None = None
 
 
@@ -84,6 +84,12 @@ def enroll_code(cid: int, request: Request, consent: bool = False, user: User = 
             "expires_at": t + request.app.state.settings.enroll_ttl_min * 60}
 
 
+def _cmd_minutes(body: CommandIn) -> int:
+    if body.action == "LOCK_NOW":
+        return body.minutes if "minutes" in body.model_fields_set else 60
+    return body.minutes if body.action == "ADD_TIME" else 0
+
+
 @router.post("/children/{cid}/command", dependencies=[Depends(csrf_check)])
 def command(cid: int, body: CommandIn, request: Request, user: User = parent_only, db: Session = Depends(get_db)):
     if body.action not in ("LOCK_NOW", "UNLOCK", "ADD_TIME"):
@@ -96,7 +102,7 @@ def command(cid: int, body: CommandIn, request: Request, user: User = parent_onl
         raise HTTPException(404, "Chưa có thiết bị nào được ghép đôi.")
     sent = 0
     for d in devs:
-        cmd = services.create_command(request.app, db, d, body.action, body.minutes if body.action == "ADD_TIME" else 0, user.email)
+        cmd = services.create_command(request.app, db, d, body.action, _cmd_minutes(body), user.email)
         sent += cmd.status == "sent"
     services.audit(db, user.email, client_ip(request), child.id, f"command_{body.action}", "", "", str(body.minutes))
     db.commit()
