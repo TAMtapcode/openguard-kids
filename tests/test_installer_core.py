@@ -165,3 +165,15 @@ def test_copy_gives_friendly_error_when_files_stay_locked(tmp_path):
     with pytest.raises(InstallError, match="khởi động lại máy") as e:
         copy_program(s, s.paths, attempts=2)
     assert len(str(e.value)) < 400
+
+
+def test_reinstalling_child_role_restarts_the_dashboard_on_a_dual_role_pc(tmp_path):
+    s = FakeSystem(tmp_path)
+    s.paths.install_dir.mkdir(parents=True)
+    s.running = {SERVICE_AGENT}
+    s.wait_https = lambda url, timeout: True
+    copy_program(s, s.paths, SERVICE_SERVER)                                   # cài lại bảng điều khiển: agent của máy con phải chạy lại
+    assert SERVICE_AGENT in s.running and SERVICE_SERVER not in s.running
+    s.running = {SERVICE_SERVER}
+    copy_program(s, s.paths, SERVICE_AGENT)
+    assert s.running == {SERVICE_SERVER}

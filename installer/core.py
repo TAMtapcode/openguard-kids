@@ -64,32 +64,39 @@ def _service_stopped(s: System, name: str) -> bool:
     return rc != 0 or "STOPPED" in out or not any(k in out for k in ("RUNNING", "PENDING"))
 
 
-def stop_running(s: System, timeout: float = 20):
-    """Dừng dịch vụ và tiến trình ogk.exe của lần cài trước để Windows không khóa tệp khi chép đè."""
+def stop_running(s: System, timeout: float = 20) -> list[str]:
+    """Dừng dịch vụ và tiến trình ogk.exe của lần cài trước để Windows không khóa tệp khi chép đè. Trả về các dịch vụ đang chạy."""
+    running = [n for n in (SERVICE_AGENT, SERVICE_SERVER) if "RUNNING" in s.run(["sc.exe", "query", n])[1]]
     for name in (SERVICE_AGENT, SERVICE_SERVER):
         s.run(["sc.exe", "stop", name])
     end = time.monotonic() + timeout
     while not all(_service_stopped(s, n) for n in (SERVICE_AGENT, SERVICE_SERVER)) and time.monotonic() < end:
         s.sleep(0.5)
     s.run(["taskkill", "/F", "/T", "/IM", "ogk.exe", "/FI", f"PID ne {os.getpid()}"])
+    return running
 
 
-def copy_program(s: System, p: Paths, attempts: int = 5):
+def copy_program(s: System, p: Paths, reinstalling: str = "", attempts: int = 5):
+    """Chép chương trình; dịch vụ của vai trò còn lại (máy vừa là máy bố mẹ vừa là máy con) được bật lại ngay sau khi chép."""
     src = s.payload_dir()
     if not s.exists(src):
         raise InstallError("Bộ cài bị thiếu tệp chương trình. Hãy tải lại OGK-Setup.exe rồi thử lại.")
-    if s.exists(p.install_dir):
-        stop_running(s)
+    running = stop_running(s) if s.exists(p.install_dir) else []
     for i in range(attempts):
         try:
             s.copy_tree(src, p.install_dir)
-            return
+            break
         except OSError as e:
             if i == attempts - 1:
                 raise InstallError(f"Không chép được chương trình vào {p.install_dir} vì tệp đang bị chương trình khác dùng. "
                                    f"Hãy khởi động lại máy rồi chạy lại OGK-Setup.exe. ({str(e)[:160]})")
             s.sleep(2)
             stop_running(s, timeout=5)
+    for name in running:
+        if name != reinstalling:
+            s.run(["sc.exe", "start", name])
+    if SERVICE_SERVER in running and reinstalling != SERVICE_SERVER:
+        s.wait_https(f"https://127.0.0.1:{p.port}/healthz", 45)
 
 
 def register_service(s: System, p: Paths, name: str, display: str, arg: str, desc: str):
@@ -135,7 +142,7 @@ def install_server(s: System, p: Paths, progress: Progress, copy_files: bool = T
     try:
         if copy_files:
             progress(5, "Đang chép chương trình…")
-            copy_program(s, p)
+            copy_program(s, p, SERVICE_SERVER)
         progress(25, "Đang tạo chứng chỉ bảo mật cho gia đình…")
         s.makedirs(p.server_data)
         s.secure_dir(p.server_data, users_read=False)  # dữ liệu và khóa chỉ SYSTEM/Administrators đọc được
@@ -213,7 +220,7 @@ def install_child(s: System, p: Paths, progress: Progress, install_code: str, se
     try:
         if copy_files:
             progress(35, "Đang chép chương trình…")
-            copy_program(s, p)
+            copy_program(s, p, SERVICE_AGENT)
         progress(55, "Đang kết nối với bố mẹ…")
         cfg = AgentConfig(home=p.agent_home, allow_insecure=allow_insecure, monitored_users=list(monitored_users or []))
         try:
