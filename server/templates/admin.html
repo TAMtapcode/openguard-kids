@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Quản trị{% endblock %}
+{% block content %}
+<header class="page-head"><h1>Quản trị hệ thống</h1>
+<p class="muted">{{ stats.children }} hồ sơ trẻ · {{ stats.devices }} thiết bị. Quản trị viên không xem được dữ liệu hoạt động của trẻ.</p></header>
+<section class="panel"><div class="scroll"><table><thead><tr><th>ID</th><th>Tài khoản</th><th>Vai trò</th><th>Trạng thái</th><th></th></tr></thead><tbody>
+{% for u in users %}<tr><td>{{ u.id }}</td><td>{{ u.email }}</td><td>{{ u.role }}</td><td>{{ 'đã khóa' if u.disabled else 'hoạt động' }}</td>
+<td>{% if u.id != user.id %}<button class="btn ghost" data-action="toggle-user" data-id="{{ u.id }}">{{ 'Mở' if u.disabled else 'Khóa' }}</button>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

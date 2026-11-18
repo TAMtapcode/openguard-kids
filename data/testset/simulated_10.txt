@@ -1,0 +1,10 @@
+blocked-test-01.example.net
+blocked-test-02.example.net
+blocked-test-03.example.net
+blocked-test-04.example.net
+blocked-test-05.example.net
+blocked-test-06.example.net
+blocked-test-07.example.net
+blocked-test-08.example.net
+blocked-test-09.example.net
+blocked-test-10.example.net

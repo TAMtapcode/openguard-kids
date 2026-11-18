@@ -1,0 +1,5 @@
+cloudflare-dns.com
+mozilla.cloudflare-dns.com
+dns.google
+dns.quad9.net
+doh.opendns.com

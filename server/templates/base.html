@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf" content="{{ csrf }}">
+<title>{% block title %}Open Guardian Kids{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="{% block bodyclass %}{% endblock %}">
+<a class="skip" href="#main">Bỏ qua điều hướng</a>
+{% block nav %}
+<nav class="top">
+  <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span>Open Guardian Kids</a>
+  <span class="grow"></span>
+  {% if user %}<span class="who">{{ user.display_name or user.email }}</span>
+  <button class="btn ghost" data-action="logout">Đăng xuất</button>{% endif %}
+</nav>
+{% endblock %}
+<main id="main">{% block content %}{% endblock %}</main>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="/static/app.js" defer></script>
+</body>
+</html>

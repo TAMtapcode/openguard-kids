@@ -1,0 +1,4 @@
+-r requirements-server.txt
+-r requirements-agent.txt
+pytest>=8
+httpx>=0.27

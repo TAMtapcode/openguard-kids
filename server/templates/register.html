@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Đăng ký · Open Guardian Kids{% endblock %}
+{% block nav %}{% endblock %}
+{% block bodyclass %}auth{% endblock %}
+{% block content %}
+<section class="auth-card">
+  <div class="brand big"><span class="brand-mark" aria-hidden="true"></span>Tạo tài khoản phụ huynh</div>
+  <p class="lede">Ứng dụng chỉ thu thập thời lượng và tên ứng dụng/tên miền. Không chụp màn hình, không ghi phím gõ, không đọc tin nhắn.</p>
+  <form method="post" action="/register" class="stack">
+    <input type="hidden" name="csrf" value="{{ pre }}">
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <label>Tên hiển thị<input name="name" required maxlength="100"></label>
+    <label>Email<input name="email" type="email" autocomplete="email" required></label>
+    <label>Mật khẩu (tối thiểu 10 ký tự)<input name="password" type="password" minlength="10" autocomplete="new-password" required></label>
+    <button class="btn primary" type="submit">Tạo tài khoản</button>
+  </form>
+  <p class="muted"><a href="/login">Đã có tài khoản? Đăng nhập</a></p>
+  <p class="muted"><a href="/privacy">Chúng tôi ghi gì và không ghi gì?</a></p>
+</section>
+{% endblock %}
