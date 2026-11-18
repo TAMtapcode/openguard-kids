@@ -99,6 +99,13 @@ def copy_program(s: System, p: Paths, reinstalling: str = "", attempts: int = 5)
         s.wait_https(f"https://127.0.0.1:{p.port}/healthz", 45)
 
 
+def public_networks(s: System) -> list[str]:
+    """Tên các mạng Windows đang xếp loại “Công cộng”: tường lửa (chỉ mở cho mạng Private) sẽ chặn máy của con."""
+    rc, out = s.run(["powershell", "-NoProfile", "-Command",
+                     "Get-NetConnectionProfile | Where-Object NetworkCategory -eq 'Public' | ForEach-Object { $_.Name }"], timeout=30)
+    return [line.strip() for line in out.splitlines() if line.strip()] if rc == 0 else []
+
+
 def register_service(s: System, p: Paths, name: str, display: str, arg: str, desc: str):
     s.run(["sc.exe", "stop", name])
     s.run(["sc.exe", "delete", name])
@@ -173,13 +180,21 @@ def install_server(s: System, p: Paths, progress: Progress, copy_files: bool = T
         register_uninstall(s, p)
         ip = (local_ips() or ["127.0.0.1"])[0]
         progress(100, "Xong!")
-        return {"fingerprint": fp, "local_url": url, "lan_url": f"https://{ip}:{p.port}"}
+        return {"fingerprint": fp, "local_url": url, "lan_url": f"https://{ip}:{p.port}", "public_networks": public_networks(s)}
     except InstallError:
         _rollback(s, p, [SERVICE_SERVER], fresh)
         raise
 
 
 # ---------------------------------------------------------------- máy của con
+NO_PARENT_FOUND = ("Không tìm thấy máy của bố mẹ trong mạng (không máy nào trả lời). Thường do:\n"
+                   "• Máy bố mẹ đang để mạng ở chế độ “Công cộng” (Public) nên tường lửa chặn. Trên máy bố mẹ: Settings → Network & internet → "
+                   "Wi-Fi/Ethernet → chọn “Private network”.\n"
+                   "• Hai máy không cùng Wi-Fi/mạng, hoặc dùng Wi-Fi khách (thường chặn các máy thấy nhau).\n"
+                   "• Máy bố mẹ đang tắt hoặc chưa cài “Máy của bố mẹ”.\n"
+                   "Hoặc bấm “Nâng cao” và nhập địa chỉ hiện trên bảng điều khiển của bố mẹ (ví dụ 192.168.1.10).")
+
+
 def _friendly_enroll_error(msg: str) -> str:
     if "hết hạn" in msg or "không đúng" in msg:
         return "Mã cài đặt không đúng hoặc đã hết hạn (mã chỉ dùng được một lần trong 10 phút). Hãy tạo mã mới trên bảng điều khiển của bố mẹ."
@@ -210,8 +225,7 @@ def install_child(s: System, p: Paths, progress: Progress, install_code: str, se
             kw = {"port": p.discovery_port} if p.discovery_port else {}
             found = find_server(check, discover(**kw), allow_insecure)
             if not found:
-                raise InstallError("Không tìm thấy máy của bố mẹ trong mạng. Hãy kiểm tra máy bố mẹ đang bật và cùng Wi-Fi với máy này, "
-                                   "hoặc bấm “Nâng cao” để nhập địa chỉ máy bố mẹ.")
+                raise InstallError(NO_PARENT_FOUND)
             url, fp = found
     except PairingError as e:
         raise InstallError(str(e))

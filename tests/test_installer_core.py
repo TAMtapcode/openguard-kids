@@ -4,7 +4,7 @@ import requests
 from agent.config import AgentConfig
 from common.installcode import fingerprint_check, parse_install_code
 from installer.core import (RUN_KEY, SERVICE_AGENT, SERVICE_SERVER, UNINSTALL_KEY, InstallError, copy_program, install_child, install_server,
-                            uninstall)
+                            public_networks, uninstall)
 from tests.fake_system import FakeSystem
 
 CHILD = {"parent_name": "Mẹ Bin", "email": "me@example.com", "password": "Mat-khau-du-manh-1", "child_name": "Bin", "child_age": 8, "consent": True}
@@ -177,3 +177,12 @@ def test_reinstalling_child_role_restarts_the_dashboard_on_a_dual_role_pc(tmp_pa
     s.running = {SERVICE_SERVER}
     copy_program(s, s.paths, SERVICE_AGENT)
     assert s.running == {SERVICE_SERVER}
+
+
+def test_public_network_on_parent_pc_is_reported(tmp_path):
+    s = FakeSystem(tmp_path)
+    assert public_networks(s) == []
+    s.run = lambda args, timeout=90: (0, "Wi-Fi Nha\r\n\r\n")
+    assert public_networks(s) == ["Wi-Fi Nha"]
+    s.run = lambda args, timeout=90: (1, "Get-NetConnectionProfile: not found")
+    assert public_networks(s) == []

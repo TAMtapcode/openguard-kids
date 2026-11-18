@@ -254,6 +254,10 @@ class Wizard:
             self.label(b, "Địa chỉ cho điện thoại / máy khác trong nhà:", 10, color=MUTED).pack(anchor="w", pady=(14, 2))
             self.tk.Label(b, text=info["lan_url"], bg=CARD, font=("Consolas", 14, "bold"), padx=12, pady=8, relief="solid", bd=1).pack(anchor="w")
             self.label(b, BROWSER_NOTE, 9, color=MUTED, wrap=650).pack(anchor="w", pady=(6, 0))
+            if info.get("public_networks"):
+                self.label(b, f"⚠ Mạng “{', '.join(info['public_networks'])}” đang ở chế độ Công cộng (Public) nên máy của con sẽ không tìm thấy "
+                              "máy này. Vào Settings → Network & internet → Wi-Fi/Ethernet → chọn “Private network”.", 10, color=RED, wrap=650
+                           ).pack(anchor="w", pady=(10, 0))
             row = self.tk.Frame(b, bg=BG)
             row.pack(anchor="w", pady=14)
             self.button(row, "Mở bảng điều khiển", lambda: self.s.open_url(info["local_url"])).pack(side="left")

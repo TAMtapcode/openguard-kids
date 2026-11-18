@@ -7,7 +7,7 @@ import pytest
 import requests
 
 from common.installcode import InstallCodeError, fingerprint_check, make_install_code, parse_install_code
-from installer.pairing import PairingError, authenticate_server, discover, fetch_fingerprint, find_server, normalize_server
+from installer.pairing import PairingError, authenticate_server, broadcast_addresses, discover, fetch_fingerprint, find_server, normalize_server
 from server.config import load_settings
 from server.discovery import DiscoveryResponder
 from server.runner import run
@@ -71,7 +71,9 @@ def test_runner_boots_https_with_autocert_and_is_discoverable(tmp_path):
         assert find_server(check, found) == (found[0]["url"], fp)
         with pytest.raises(PairingError, match="không khớp"):
             authenticate_server(scheme, host, p, "AAAAAAAA")                                  # mã sai/máy giả mạo -> từ chối
-        assert find_server("AAAAAAAA", found) is None
+        with pytest.raises(PairingError, match="không khớp"):                                 # có máy trả lời nhưng sai mã: báo đúng lý do
+            find_server("AAAAAAAA", found)
+        assert find_server(check, []) is None
         with pytest.raises(PairingError, match="thiếu phần xác thực"):
             authenticate_server(scheme, host, p, None)
     finally:
@@ -156,3 +158,8 @@ def test_download_route_serves_installer_when_available(tmp_path):
         assert r.status_code == 200 and r.content == b"MZ-fake"
     finally:
         live.stop()
+
+
+def test_discovery_also_targets_each_network_cards_broadcast_address():
+    addrs = broadcast_addresses()
+    assert all(not a.startswith("127.") and a.count(".") == 3 for a in addrs)
