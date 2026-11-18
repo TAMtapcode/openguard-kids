@@ -28,7 +28,8 @@ IGNORED_APPS = {"explorer.exe", "searchhost.exe", "lockapp.exe", "shellexperienc
                 "pythonw.exe", "ogk.exe", "ogk-tray.exe", "applicationframehost.exe", "textinputhost.exe"}
 DOMAIN_WINDOW = 120.0      # giây: hai truy vấn cùng tên miền cách nhau < 120s được coi là đang xem liên tục
 RESTORE_BREAK = 300.0      # nghỉ >= 5 phút thì tính lại thời gian dùng liên tục
-EYE_BREAK = 3600.0         # nhắc nghỉ mắt sau 60 phút dùng liên tục
+EYE_BREAK = 3600.0
+MANUAL_LOCK_MIN = 60       # phút: "Khóa ngay" tự mở sau thời gian này để máy không bao giờ bị kẹt khóa         # nhắc nghỉ mắt sau 60 phút dùng liên tục
 
 
 class Engine:
@@ -54,7 +55,6 @@ class Engine:
         self._last_tray_launch = -1e9
         self.suspended = False
         self.applies = True   # False khi đang dùng tài khoản Windows không thuộc diện quản lý (ví dụ tài khoản của bố mẹ)
-        self._last_lock = -1e9
         self._last_active = -1e9
         self._dom_groups: dict = {}
         self._dom_last: dict = {}
@@ -255,7 +255,7 @@ class Engine:
         if not (self.policy and self.enrolled) or self.suspended or not self.applies:
             prev, self.decision = self.decision, Decision(state="suspended" if self.suspended else "ok")
             return
-        manual = self.store.kv_get("manual_lock", "0") == "1"
+        manual = float(self.store.kv_get("manual_lock_until", "0") or 0) > self.clock.now()   # lệnh khóa tay luôn tự hết hạn
         prev = self.decision
         dec = self.enforcer.evaluate(self.policy, dt_local, self.acc.get(day, "total"), self.acc.get(day, "bonus"), manual)
         self.decision = dec
@@ -272,9 +272,8 @@ class Engine:
                 self.event("locked", dec.reason or "quota")
                 self.notify("locked", "Máy đang khóa", self._lock_text(dec.reason), reason=dec.reason, can_request=True,
                             emergency="Cần giúp đỡ khẩn cấp? Gọi Tổng đài quốc gia bảo vệ trẻ em 111 hoặc nhờ người lớn.")
-            if self.mono() - self._last_lock >= 5 and self.platform.has_user_session():
-                self._last_lock = self.mono()
-                self.platform.lock_session()
+                if self.platform.has_user_session():
+                    self.platform.lock_session()   # chỉ báo một lần; màn hình khóa do khay hiển thị, KHÔNG ngắt phiên Windows
 
     @staticmethod
     def _lock_text(reason):
@@ -352,10 +351,11 @@ class Engine:
                 return True
             _, day = self._parts()
             if act == "LOCK_NOW":
-                self.store.kv_set("manual_lock", "1")
+                mins = max(5, min(int(cmd.get("minutes") or MANUAL_LOCK_MIN), 240))
+                self.store.kv_set("manual_lock_until", f"{self.clock.now() + mins * 60:.0f}")
                 self.event("locked", "manual")
             elif act == "UNLOCK":
-                self.store.kv_set("manual_lock", "0")
+                self.store.kv_set("manual_lock_until", "0")
             elif act == "ADD_TIME":
                 m = max(0, min(int(cmd.get("minutes", 15)), 240))
                 self.acc.add(day, "bonus", m * 60)
@@ -486,6 +486,8 @@ class Engine:
                     groups[g] = {"label": CATEGORIES.get(g, g), "used_sec": int(self.acc.get(day, f"g:{g}")), "budget_sec": int(b + self.acc.get(day, "gbonus"))}
             mood = "sleepy" if self._cont >= EYE_BREAK else ("happy" if total > 0 and edu / total >= 0.5 else "ok")
             return {"child": self.cfg.child_name, "enrolled": self.enrolled, "applies": self.applies, "state": "suspended" if self.suspended else d.state, "reason": d.reason,
+                    "lock_text": self._lock_text(d.reason) if d.state == "locked" else None,
+                    "manual_until": int(float(self.store.kv_get("manual_lock_until", "0") or 0)) or None,
                     "remaining_sec": int(d.remaining_sec) if math.isfinite(d.remaining_sec) else None, "limit_sec": int(d.limit_sec),
                     "used_sec": int(total), "grace_left": None if d.grace_left is None else int(d.grace_left), "online": self.online,
                     "policy_version": p.version if p else 0, "stale": self.is_stale(), "groups": groups,

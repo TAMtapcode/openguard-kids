@@ -243,3 +243,19 @@ def test_shared_pc_only_childs_windows_account_is_limited(tmp_path):
     locks = plat.locks
     ticks(eng, fc, 20)
     assert eng.decision.state == "ok" and plat.locks == locks
+
+
+def test_manual_lock_expires_by_itself_so_the_pc_never_stays_stuck(tmp_path):
+    eng, plat, fc = local_engine(tmp_path)
+    eng.handle_command({"id": 1, "action": "LOCK_NOW", "minutes": 30})
+    until = float(eng.store.kv_get("manual_lock_until"))
+    assert eng.decision.state == "locked" and 29 * 60 <= until - eng.clock.now() <= 30 * 60 + 1
+    assert eng.state_view()["lock_text"] and eng.state_view()["manual_until"] == int(until)
+    eng.store.kv_set("manual_lock_until", f"{eng.clock.now() - 1:.0f}")         # hết thời hạn khóa
+    eng.enforce_now()
+    assert eng.decision.state == "ok"
+    eng.store.kv_set("manual_lock", "1")                                         # trạng thái kẹt của bản cũ không còn tác dụng
+    eng.enforce_now()
+    assert eng.decision.state == "ok"
+    eng.handle_command({"id": 2, "action": "LOCK_NOW"})
+    assert abs(float(eng.store.kv_get("manual_lock_until")) - eng.clock.now() - 3600) <= 1   # mặc định 60 phút
