@@ -54,10 +54,10 @@ def shot(root, name):
     ImageGrab.grab(bbox=(x, y, x + root.winfo_width(), y + root.winfo_height())).save(f"{os.environ['OGK_SHOTS']}/{name}.png")
 
 
-def test_welcome_offers_three_plain_language_choices(root, tmp_path):
+def test_welcome_offers_two_plain_language_choices(root, tmp_path):
     w = Wizard(root, FakeSystem(tmp_path), sync=True)
     t = texts(w)
-    assert "Máy của bố mẹ" in t and "Máy của con" in t and "Cả nhà chỉ có một máy tính" in t and "KHÔNG chụp màn hình" in t
+    assert "Máy của bố mẹ" in t and "Máy của con" in t and "Cả nhà chỉ có một máy tính" not in t and "KHÔNG chụp màn hình" in t
     shot(root, "1_welcome")
 
 
