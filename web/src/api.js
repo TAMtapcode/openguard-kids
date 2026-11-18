@@ -29,7 +29,7 @@ export async function api(method, path, body) {
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const t = token();
   if (t) headers.Authorization = `Bearer ${t}`;
-  else if (csrf && method !== "GET") headers["X-CSRF-Token"] = csrf;
+  else if (!isRemote && csrf && method !== "GET") headers["X-CSRF-Token"] = csrf;   // CSRF chỉ cho phiên cookie
   let r;
   try {
     r = await fetch(serverUrl() + path, { method, headers, credentials: isRemote ? "omit" : "same-origin",
