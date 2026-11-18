@@ -16,7 +16,7 @@ Hệ thống **đồng hành và quản lý thời gian dùng máy tính của t
 2. Mở “Bảng điều khiển OGK” → tạo tài khoản → thêm con → bấm **“Tạo mã cài đặt”** (mã dạng `ABCD-2345-XXXX-XXXX`).
 3. Mở `OGK-Setup.exe` trên máy của con → chọn **“Máy của con”** → dán mã → *Cài đặt*.
 
-Nhà chỉ có một máy? Chọn **“Cả nhà chỉ có một máy tính”**, điền thông tin một lần là xong. Hướng dẫn đầy đủ kèm xử lý sự cố: **[HUONG_DAN_CAI_DAT.md](HUONG_DAN_CAI_DAT.md)**.
+Hướng dẫn đầy đủ kèm xử lý sự cố: **[HUONG_DAN_CAI_DAT.md](HUONG_DAN_CAI_DAT.md)**.
 
 Vì sao dễ: máy con **tự tìm** máy bố mẹ trong mạng; chứng chỉ bảo mật, tường lửa (chỉ mạng nhà), dịch vụ, lối tắt đều **tự động**; mã cài đặt đã **kèm xác thực chứng chỉ** (không phải sao chép mã ghim 64 ký tự); gỡ cài đặt ở **Settings → Apps** như phần mềm bình thường.
 

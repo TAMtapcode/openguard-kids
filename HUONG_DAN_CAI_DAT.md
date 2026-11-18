@@ -7,7 +7,6 @@ Bạn **không cần biết kỹ thuật**. Cả quá trình khoảng 5 phút v�
 - Bạn có quyền quản trị (Administrator) trên cả hai máy. Windows sẽ hỏi “Bạn có cho phép…?”, hãy bấm **Yes**.
 - Tài khoản Windows của con nên là loại **thường (Standard)**, không phải Administrator, để con không tự tắt được ứng dụng.
 
-> **Nhà chỉ có một máy tính?** Bố mẹ và con đăng nhập hai tài khoản Windows khác nhau? Bỏ qua Bước 1 và 3, dùng **“Cả nhà chỉ có một máy tính”** ở trình cài đặt. Điền thông tin một lần là xong.
 
 ---
 

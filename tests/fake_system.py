@@ -32,6 +32,7 @@ class FakeSystem(System):
 
     # --- giả lập
     def is_admin(self): return self.admin
+    def sleep(self, seconds): pass
 
     def run(self, args, timeout=90):
         self.commands.append([str(a) for a in args])

@@ -118,7 +118,6 @@ class Wizard:
         self.heading("Chào mừng!", "Công cụ giúp con dùng máy tính lành mạnh: minh bạch, không theo dõi lén. Máy này là…")
         self.card("🏠", "Máy của bố mẹ", "Cài bảng điều khiển để xem và quản lý các máy của con. Làm bước này TRƯỚC.", self.show_parent)
         self.card("🧒", "Máy của con", "Cài ứng dụng đồng hành lên máy tính của con. Cần mã cài đặt từ bảng điều khiển của bố mẹ.", self.show_child)
-        self.card("🖥", "Cả nhà chỉ có một máy tính", "Bố mẹ và con dùng hai tài khoản Windows khác nhau trên cùng một máy. Cài mọi thứ chỉ trong một lần.", self.show_shared)
         self.label(self.body, "🔒  " + PRIVACY, 10, color=MUTED, wrap=650).pack(anchor="w", pady=(16, 0))
 
     def show_parent(self):
@@ -188,51 +187,6 @@ class Wizard:
         server, code, ok = self.server_var.get().strip() or None, self.code_var.get(), self.ok_var.get()
         self.run_task("Đang cài đặt trên máy của con…",
                       lambda pr: core.install_child(self.s, self.p, pr, code, server, users, ok), self.done_child, retry=self.show_child)
-
-    def show_shared(self):
-        tk = self.tk
-        self.clear()
-        self.heading("Cài đặt cho máy dùng chung", "Điền thông tin một lần, phần còn lại tự động.")
-        v = {k: self.sv() for k in ("pname", "email", "pw", "cname", "age", "cuser")}
-        v["age"].set("9")
-        self.sv_, self.ok_var = v, self.bv()
-        cols = tk.Frame(self.body, bg=BG)
-        cols.pack(fill="x")
-        left, right = tk.Frame(cols, bg=BG), tk.Frame(cols, bg=BG)
-        left.pack(side="left", fill="both", expand=True)
-        right.pack(side="left", fill="both", expand=True, padx=(24, 0))
-        self.label(left, "Bố/mẹ", 12, True).pack(anchor="w")
-        self.field(left, "Tên của bạn (không bắt buộc)", v["pname"], width=26)
-        self.field(left, "Email hoặc tên đăng nhập", v["email"], width=26)
-        self.field(left, "Mật khẩu (từ 8 ký tự)", v["pw"], show="•", width=26)
-        self.label(right, "Con", 12, True).pack(anchor="w")
-        self.field(right, "Tên của con", v["cname"], width=26)
-        self.field(right, "Tuổi", v["age"], width=8)
-        self.label(right, "Tài khoản Windows của con", 10, color=MUTED).pack(anchor="w", pady=(8, 2))
-        others = [u for u in self.s.local_users() if u.lower() != self.s.current_user().lower()]
-        self.ttk.Combobox(right, textvariable=v["cuser"], values=others, width=24).pack(anchor="w", ipady=3)
-        if others:
-            v["cuser"].set(others[0])
-        self.label(right, "Chỉ tài khoản này bị giới hạn giờ. Tài khoản của bạn không bị ảnh hưởng. Chưa có? Tạo trong Settings → Accounts → Family & other users.", 9, color=MUTED, wrap=300).pack(anchor="w", pady=(4, 0))
-        self.check(CONSENT, self.ok_var, self.refresh_shared).pack(anchor="w", pady=(18, 0))
-        for var in v.values():
-            var.trace_add("write", lambda *_: self.refresh_shared())
-        self.nav(self.show_welcome, "Cài đặt", self.start_shared, "disabled")
-
-    def refresh_shared(self):
-        v = self.sv_
-        ready = all(v[k].get().strip() for k in ("email", "pw", "cname", "cuser")) and self.ok_var.get()
-        if self.nextbtn:
-            self.nextbtn.config(state="normal" if ready else "disabled")
-
-    def start_shared(self):
-        v = self.sv_
-        try:
-            age = int(v["age"].get())
-        except ValueError:
-            age = 9
-        args = (v["pname"].get(), v["email"].get(), v["pw"].get(), v["cname"].get(), age, v["cuser"].get(), self.ok_var.get())
-        self.run_task("Đang cài đặt cho cả nhà…", lambda pr: core.install_shared(self.s, self.p, pr, *args), self.done_shared, retry=self.show_shared)
 
     # ------------------------------------------------------------- chạy tác vụ + tiến độ
     def run_task(self, title, fn, on_done, retry=None):
@@ -311,14 +265,6 @@ class Wizard:
         self._done(f"Đã cài xong cho {info['child']}", ["Biểu tượng chiếc lá xanh sẽ hiện ở góc phải thanh taskbar khi con đăng nhập.",
                    "Từ giờ bố mẹ có thể xem và đặt giới hạn từ bảng điều khiển.",
                    "Gỡ cài đặt bất cứ lúc nào ở Settings → Apps → Open Guardian Kids (cần quyền quản trị)."])
-
-    def done_shared(self, info):
-        def extra(b):
-            self.label(b, f"Đăng nhập bằng {info['email']}. Chỉ tài khoản Windows “{info['child_windows_user']}” bị giới hạn giờ.", 10, color=MUTED, wrap=650).pack(anchor="w", pady=(10, 0))
-            self.label(b, BROWSER_NOTE, 9, color=MUTED, wrap=650).pack(anchor="w", pady=(6, 0))
-            self.button(b, "Mở bảng điều khiển", lambda: self.s.open_url(info["local_url"])).pack(anchor="w", pady=14)
-        self._done("Mọi thứ đã sẵn sàng", [f"Đã cài bảng điều khiển và bảo vệ cho {info['child']} trên máy này.",
-                   "Lối tắt “Bảng điều khiển OGK” đã có trên màn hình nền."], extra)
 
     # ------------------------------------------------------------- gỡ cài đặt
     def show_uninstall(self):

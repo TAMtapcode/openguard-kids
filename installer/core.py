@@ -3,18 +3,17 @@ from __future__ import annotations
 
 import os
 import socket
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-import requests
 
 from agent.config import VERSION, default_home
 from common.installcode import InstallCodeError, parse_install_code
-from server.security import login_problem, password_problem
 from server.tls import ensure_cert, local_ips
 
-from .pairing import PairingError, authenticate_server, discover, fetch_fingerprint, find_server, normalize_server
+from .pairing import PairingError, authenticate_server, discover, find_server, normalize_server
 from .system import System
 
 SERVICE_AGENT, SERVICE_SERVER = "OpenGuardKids", "OpenGuardKidsServer"
@@ -60,14 +59,37 @@ def _scaled(progress: Progress, lo: int, hi: int) -> Progress:
 
 
 # ---------------------------------------------------------------- các bước dùng chung
-def copy_program(s: System, p: Paths):
+def _service_stopped(s: System, name: str) -> bool:
+    rc, out = s.run(["sc.exe", "query", name])
+    return rc != 0 or "STOPPED" in out or not any(k in out for k in ("RUNNING", "PENDING"))
+
+
+def stop_running(s: System, timeout: float = 20):
+    """Dừng dịch vụ và tiến trình ogk.exe của lần cài trước để Windows không khóa tệp khi chép đè."""
+    for name in (SERVICE_AGENT, SERVICE_SERVER):
+        s.run(["sc.exe", "stop", name])
+    end = time.monotonic() + timeout
+    while not all(_service_stopped(s, n) for n in (SERVICE_AGENT, SERVICE_SERVER)) and time.monotonic() < end:
+        s.sleep(0.5)
+    s.run(["taskkill", "/F", "/T", "/IM", "ogk.exe", "/FI", f"PID ne {os.getpid()}"])
+
+
+def copy_program(s: System, p: Paths, attempts: int = 5):
     src = s.payload_dir()
     if not s.exists(src):
         raise InstallError("Bộ cài bị thiếu tệp chương trình. Hãy tải lại OGK-Setup.exe rồi thử lại.")
-    try:
-        s.copy_tree(src, p.install_dir)
-    except OSError as e:
-        raise InstallError(f"Không chép được chương trình vào {p.install_dir}. Hãy tắt phần mềm diệt virus tạm thời rồi thử lại. ({e})")
+    if s.exists(p.install_dir):
+        stop_running(s)
+    for i in range(attempts):
+        try:
+            s.copy_tree(src, p.install_dir)
+            return
+        except OSError as e:
+            if i == attempts - 1:
+                raise InstallError(f"Không chép được chương trình vào {p.install_dir} vì tệp đang bị chương trình khác dùng. "
+                                   f"Hãy khởi động lại máy rồi chạy lại OGK-Setup.exe. ({str(e)[:160]})")
+            s.sleep(2)
+            stop_running(s, timeout=5)
 
 
 def register_service(s: System, p: Paths, name: str, display: str, arg: str, desc: str):
@@ -211,47 +233,6 @@ def install_child(s: System, p: Paths, progress: Progress, install_code: str, se
     except InstallError:
         _rollback(s, p, [SERVICE_AGENT], fresh and copy_files)
         raise
-
-
-# ---------------------------------------------------------------- một máy dùng chung
-def _local_setup(p: Paths, fp: str, body: dict) -> dict:
-    url = f"https://127.0.0.1:{p.port}/api/setup/local"
-    try:
-        if fetch_fingerprint("127.0.0.1", p.port) != fp:
-            raise InstallError("Chứng chỉ của bảng điều khiển trên máy này không khớp. Hãy chạy lại trình cài đặt.")
-        r = requests.post(url, json=body, verify=False, timeout=15)
-    except (OSError, requests.RequestException):
-        raise InstallError("Không kết nối được tới bảng điều khiển vừa cài. Hãy khởi động lại máy rồi chạy lại OGK-Setup.exe.")
-    if r.status_code == 409:
-        raise InstallError("Máy này đã được thiết lập trước đó. Hãy mở “Bảng điều khiển OGK” và đăng nhập, rồi dùng “Tạo mã cài đặt”.")
-    if r.status_code >= 400:
-        d = r.json().get("detail", "")
-        if isinstance(d, list):
-            d = "; ".join(x.get("msg", "") for x in d)
-        raise InstallError(str(d) or "Thông tin chưa hợp lệ.")
-    return r.json()
-
-
-def install_shared(s: System, p: Paths, progress: Progress, parent_name: str, email: str, password: str, child_name: str,
-                   child_age: int, child_windows_user: str, accept: bool) -> dict:
-    if not accept:
-        raise InstallError("Cần tích xác nhận bạn là cha/mẹ hoặc người giám hộ hợp pháp và đồng ý trước khi cài đặt.")
-    if not child_windows_user.strip():
-        raise InstallError("Hãy chọn tài khoản Windows của con. Chỉ tài khoản này bị giới hạn giờ, tài khoản của bố mẹ không bị ảnh hưởng.")
-    if child_windows_user.strip().lower() == s.current_user().lower():
-        raise InstallError("Tài khoản Windows của con không được trùng với tài khoản bạn đang dùng, nếu không bạn sẽ bị giới hạn giờ. "
-                           "Hãy tạo thêm một tài khoản Windows cho con (Settings → Accounts → Family & other users).")
-    email = email.strip().lower()
-    problem = login_problem(email) or password_problem(password)
-    if problem:
-        raise InstallError(problem)
-    info = install_server(s, p, _scaled(progress, 0, 60))
-    progress(62, "Đang tạo tài khoản phụ huynh…")
-    resp = _local_setup(p, info["fingerprint"], {"parent_name": parent_name, "email": email, "password": password,
-                                                  "child_name": child_name, "child_age": child_age, "consent": accept})
-    child = install_child(s, p, _scaled(progress, 65, 100), resp["install_code"], server=f"https://127.0.0.1:{p.port}",
-                          monitored_users=[child_windows_user.strip()], accept=True, copy_files=False)
-    return {**info, **child, "email": email, "child_windows_user": child_windows_user.strip()}
 
 
 # ---------------------------------------------------------------- gỡ cài đặt

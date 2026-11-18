@@ -1,12 +1,10 @@
-import json
-
 import pytest
 import requests
 
 from agent.config import AgentConfig
 from common.installcode import fingerprint_check, parse_install_code
-from installer.core import (RUN_KEY, SERVICE_AGENT, SERVICE_SERVER, UNINSTALL_KEY, InstallError, install_child, install_server,
-                            install_shared, uninstall)
+from installer.core import (RUN_KEY, SERVICE_AGENT, SERVICE_SERVER, UNINSTALL_KEY, InstallError, copy_program, install_child, install_server,
+                            uninstall)
 from tests.fake_system import FakeSystem
 
 CHILD = {"parent_name": "Mẹ Bin", "email": "me@example.com", "password": "Mat-khau-du-manh-1", "child_name": "Bin", "child_age": 8, "consent": True}
@@ -111,55 +109,12 @@ def test_used_code_gives_friendly_error_and_rolls_back(parent_pc, tmp_path):
     assert not c2.paths.install_dir.exists()                                    # hoàn tác sạch
 
 
-def test_shared_pc_installs_everything_in_one_go_and_only_limits_childs_account(tmp_path, monkeypatch):
-    monkeypatch.delenv("OGK_HOME", raising=False)
-    s = FakeSystem(tmp_path, current="Me", with_own_exe=True)
-    try:
-        steps = []
-        res = install_shared(s, s.paths, lambda pct, t: steps.append(pct), "Mẹ Bin", "me@example.com", "Mat-khau-du-manh-1", "Bin", 8, "Bin", True)
-        assert steps == sorted(steps) and steps[-1] == 100
-        cfg = AgentConfig.load(s.paths.agent_home)
-        assert cfg.monitored_users == ["Bin"] and cfg.device_id and res["email"] == "me@example.com" and res["child"] == "Bin"
-        assert {c[2] for c in s.commands if c[:2] == ["sc.exe", "create"]} == {SERVICE_SERVER, SERVICE_AGENT}
-        # tài khoản phụ huynh đăng nhập được ngay vào bảng điều khiển
-        import re
-        web = requests.Session()
-        base = f"https://127.0.0.1:{s.paths.port}"
-        tok = re.search(r'name="csrf" value="([^"]+)"', web.get(base + "/login", verify=False).text).group(1)
-        r = web.post(base + "/login", data={"email": "me@example.com", "password": "Mat-khau-du-manh-1", "csrf": tok}, verify=False)
-        assert "Hôm nay con đang thế nào" in r.text
-        # cửa sổ khởi tạo đã đóng: không ai tạo thêm được tài khoản qua đường này
-        assert requests.post(base + "/api/setup/local", json=CHILD, verify=False, timeout=5).status_code == 409
-    finally:
-        s.shutdown()
-
-
-def test_shared_pc_refuses_to_limit_the_parents_own_account(tmp_path):
-    s = FakeSystem(tmp_path, current="Me")
-    with pytest.raises(InstallError, match="không được trùng"):
-        install_shared(s, s.paths, lambda *_: None, "Mẹ", "me@example.com", "Mat-khau-du-manh-1", "Bin", 8, "me", True)
-    with pytest.raises(InstallError, match="chọn tài khoản"):
-        install_shared(s, s.paths, lambda *_: None, "Mẹ", "me@example.com", "Mat-khau-du-manh-1", "Bin", 8, "  ", True)
-    with pytest.raises(InstallError, match="xác nhận"):
-        install_shared(s, s.paths, lambda *_: None, "Mẹ", "me@example.com", "Mat-khau-du-manh-1", "Bin", 8, "Bin", False)
-    assert s.commands == []                                                    # chưa đụng gì tới hệ thống
-
-
-def test_shared_pc_weak_password_is_a_friendly_error(tmp_path, monkeypatch):
-    monkeypatch.delenv("OGK_HOME", raising=False)
-    s = FakeSystem(tmp_path, current="Me")
-    try:
-        with pytest.raises(InstallError, match="8 ký tự"):
-            install_shared(s, s.paths, lambda *_: None, "Mẹ", "me@example.com", "ngan", "Bin", 8, "Bin", True)
-    finally:
-        s.shutdown()
-
-
 def test_uninstall_removes_everything_and_restores_network(tmp_path, monkeypatch):
     monkeypatch.delenv("OGK_HOME", raising=False)
     s = FakeSystem(tmp_path, with_own_exe=True)
     try:
-        install_shared(s, s.paths, lambda *_: None, "Mẹ", "me@example.com", "Mat-khau-du-manh-1", "Bin", 8, "Bin", True)
+        install_server(s, s.paths, lambda *_: None)
+        install_child(s, s.paths, lambda *_: None, child_code(s), server=f"https://127.0.0.1:{s.paths.port}", accept=True, copy_files=False)
     finally:
         s.shutdown()
     s.commands.clear()
@@ -182,3 +137,31 @@ def test_uninstall_can_keep_data(tmp_path):
     (s.paths.install_dir / "ogk.exe").write_text("x")
     uninstall(s, s.paths, lambda *_: None, keep_data=True)
     assert s.paths.agent_home.exists() and s.paths.server_data.exists()
+
+
+def test_reinstall_stops_old_processes_before_copying_and_retries_locked_files(tmp_path):
+    s = FakeSystem(tmp_path)
+    s.paths.install_dir.mkdir(parents=True)
+    fails = [OSError("[WinError 32] The process cannot access the file because it is being used by another process")]
+    real_copy = s.copy_tree
+
+    def flaky_copy(src, dst):
+        s.commands.append(["copy"])
+        if fails:
+            raise fails.pop()
+        real_copy(src, dst)
+    s.copy_tree = flaky_copy
+    copy_program(s, s.paths)
+    first_copy = s.commands.index(["copy"])
+    before = s.commands[:first_copy]
+    assert ["sc.exe", "stop", SERVICE_SERVER] in before and ["sc.exe", "stop", SERVICE_AGENT] in before
+    assert any(c[:2] == ["taskkill", "/F"] and "ogk.exe" in c for c in before)
+    assert s.commands.count(["copy"]) == 2 and (s.paths.install_dir / "ogk.exe").exists()
+
+
+def test_copy_gives_friendly_error_when_files_stay_locked(tmp_path):
+    s = FakeSystem(tmp_path)
+    s.copy_tree = lambda src, dst: (_ for _ in ()).throw(OSError("WinError 32 " + "x" * 5000))
+    with pytest.raises(InstallError, match="khởi động lại máy") as e:
+        copy_program(s, s.paths, attempts=2)
+    assert len(str(e.value)) < 400
