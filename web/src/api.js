@@ -20,7 +20,8 @@ export function normalizeServer(input) {
   if (!u) return "";
   if (!/^https?:\/\//i.test(u)) u = "https://" + u;
   const url = new URL(u);
-  if (!url.port && url.protocol === "https:") url.port = "8443";
+  const explicitPort = /^https?:\/\/(\[[^\]]+\]|[^/:]+):\d+/i.test(u);   // URL bỏ cổng mặc định (443) khỏi .port
+  if (!explicitPort && url.protocol === "https:") url.port = "8443";
   return url.origin;
 }
 
