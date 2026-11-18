@@ -2,10 +2,14 @@ name: Build Windows installer
 on:
   workflow_dispatch: {}
   push:
+    branches: ["main"]
     tags: ["v*"]
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ hashFiles('ogk/pytest.ini') != '' && 'ogk' || '.' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -16,13 +20,23 @@ jobs:
   build:
     needs: test
     runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: ${{ hashFiles('ogk/pytest.ini') != '' && 'ogk' || '.' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: ./scripts/build_windows.ps1
       - uses: actions/upload-artifact@v4
-        with: { name: OGK-Setup, path: dist/OGK-Setup.exe }
+        with:
+          name: OGK-Setup
+          path: |
+            dist/OGK-Setup.exe
+            ogk/dist/OGK-Setup.exe
       - if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
-        with: { files: dist/OGK-Setup.exe }
+        with:
+          files: |
+            dist/OGK-Setup.exe
+            ogk/dist/OGK-Setup.exe

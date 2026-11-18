@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import psutil
 
@@ -47,25 +49,11 @@ def sha256_file(path: str) -> str | None:
 
 
 def default_source():
-    """Yield processes with their actual executable image path when available.
-
-    On Linux psutil can report ``exe=None`` for a process even when its procfs
-    executable link is readable. Falling back to /proc/<pid>/exe is important
-    for hash-based matching, especially for executables whose filename changed.
-    """
     for p in psutil.process_iter(["pid", "name", "exe", "create_time"]):
         try:
             i = p.info
-            pid = i["pid"]
-            exe = i.get("exe")
-            if not exe and os.name == "posix" and os.path.exists(f"/proc/{pid}/exe"):
-                try:
-                    exe = os.readlink(f"/proc/{pid}/exe")
-                except OSError:
-                    pass
-            name = (i.get("name") or os.path.basename(exe or "")).lower()
-            yield ProcInfo(pid, name, exe, i.get("create_time") or 0.0)
-        except (psutil.Error, OSError, KeyError):
+            yield ProcInfo(i["pid"], (i["name"] or "").lower(), i.get("exe"), i.get("create_time") or 0.0)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
 
