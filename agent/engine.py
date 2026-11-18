@@ -25,7 +25,7 @@ from .sync_client import AuthLost, Offline
 
 log = logging.getLogger("ogk")
 IGNORED_APPS = {"explorer.exe", "searchhost.exe", "lockapp.exe", "shellexperiencehost.exe", "startmenuexperiencehost.exe",
-                "pythonw.exe", "ogk-tray.exe", "applicationframehost.exe", "textinputhost.exe"}
+                "pythonw.exe", "ogk.exe", "ogk-tray.exe", "applicationframehost.exe", "textinputhost.exe"}
 DOMAIN_WINDOW = 120.0      # giây: hai truy vấn cùng tên miền cách nhau < 120s được coi là đang xem liên tục
 RESTORE_BREAK = 300.0      # nghỉ >= 5 phút thì tính lại thời gian dùng liên tục
 EYE_BREAK = 3600.0         # nhắc nghỉ mắt sau 60 phút dùng liên tục

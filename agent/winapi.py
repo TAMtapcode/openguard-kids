@@ -172,8 +172,8 @@ class WindowsPlatform(Platform):
             env = win32profile.CreateEnvironmentBlock(token, False)
             si = win32process.STARTUPINFO()
             si.lpDesktop = "winsta0\\default"
-            if getattr(sys, "frozen", False):  # bản đóng gói: ogk-tray.exe nằm ở thư mục anh em của service
-                cmd = f'"{Path(sys.executable).parent.parent / "tray" / "ogk-tray.exe"}"'
+            if getattr(sys, "frozen", False):  # bản đóng gói: cùng ogk.exe với dịch vụ, chạy chế độ tray
+                cmd = f'"{sys.executable}" tray'
             else:
                 cmd = f'"{sys.executable.replace("python.exe", "pythonw.exe")}" -m agent tray'
             win32process.CreateProcessAsUser(token, None, cmd, None, None, False,
@@ -346,8 +346,8 @@ class WindowsPlatform(Platform):
             env = win32profile.CreateEnvironmentBlock(token, False)
             si = win32process.STARTUPINFO()
             si.lpDesktop = "winsta0\\default"
-            if getattr(sys, "frozen", False):  # bản đóng gói: ogk-tray.exe nằm ở thư mục anh em của service
-                cmd = f'"{Path(sys.executable).parent.parent / "tray" / "ogk-tray.exe"}"'
+            if getattr(sys, "frozen", False):  # bản đóng gói: cùng ogk.exe với dịch vụ, chạy chế độ tray
+                cmd = f'"{sys.executable}" tray'
             else:
                 cmd = f'"{sys.executable.replace("python.exe", "pythonw.exe")}" -m agent tray'
             win32process.CreateProcessAsUser(token, None, cmd, None, None, False,
