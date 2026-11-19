@@ -23,6 +23,17 @@ from ..security import decode_access_token, make_access_token, new_token, sha256
 
 router = APIRouter()
 
+def _notify_web(app, db: Session, child_id: int, event_type: str, **extra):
+    hub = getattr(app.state, "parent_hub", None)
+    if hub is None:
+        return
+    child = db.get(Child, child_id)
+    if child is None:
+        return
+    hub.notify({"type": event_type, "child_id": child_id, "child_name": child.name, "ts": now(), **extra},
+               parent_id=child.parent_id, child_id=child_id)
+
+
 
 class EnrollIn(BaseModel):
     code: str = Field(min_length=8, max_length=8)
@@ -92,6 +103,7 @@ def enroll(body: EnrollIn, request: Request, db: Session = Depends(get_db)):
     services.get_policy_row(db, child)
     services.audit(db, f"thiết bị {dev.name}", ip, child.id, "device_enrolled", "device", "", dev.id)
     db.commit()
+    _notify_web(request.app, db, child.id, "device_enrolled", device_id=dev.id)
     return {"device_id": dev.id, "child_name": child.name, "child_id": child.id, "server_time": now(),
             "policy_key": base64.b64encode(dev.policy_key).decode(), **tokens}
 
@@ -123,6 +135,7 @@ def heartbeat(body: HeartbeatIn, request: Request, dev: Device = Depends(current
     du.groups = json.dumps(body.group_usage)
     cmds = [services.command_frame(c) for c in services.pending_commands(db, dev)]
     db.commit()
+    _notify_web(request.app, db, dev.child_id, "device_status", device_id=dev.id, state=dev.state)
     return {"server_time": now(), "policy_version": row.version, "commands": cmds}
 
 
@@ -132,7 +145,7 @@ def get_policy(request: Request, dev: Device = Depends(current_device), db: Sess
 
 
 @router.post("/api/v1/events/sync")
-def events_sync(body: EventsIn, dev: Device = Depends(current_device), db: Session = Depends(get_db)):
+def events_sync(body: EventsIn, request: Request, dev: Device = Depends(current_device), db: Session = Depends(get_db)):
     accepted = dup = rejected = 0
     for e in body.events:
         if e.type not in EVENT_TYPES or (e.subject and not is_valid_subject(e.subject)):
@@ -146,11 +159,13 @@ def events_sync(body: EventsIn, dev: Device = Depends(current_device), db: Sessi
         except IntegrityError:
             dup += 1  # khử trùng bằng idempotency_key
     db.commit()
+    if accepted:
+        _notify_web(request.app, db, dev.child_id, "activity", accepted=accepted)
     return {"accepted": accepted, "duplicates": dup, "rejected": rejected}
 
 
 @router.post("/api/v1/requests/{kind}")
-def add_request(kind: str, body: RequestIn, dev: Device = Depends(current_device), db: Session = Depends(get_db)):
+def add_request(kind: str, body: RequestIn, request: Request, dev: Device = Depends(current_device), db: Session = Depends(get_db)):
     if kind not in REQUEST_KINDS:
         raise HTTPException(404, "Loại yêu cầu không tồn tại.")
     if body.subject and not is_valid_subject(body.subject):
@@ -167,6 +182,7 @@ def add_request(kind: str, body: RequestIn, dev: Device = Depends(current_device
     db.add(Event(idem_key=str(uuid.uuid4()), ts=now(), device_id=dev.id, child_id=dev.child_id, type="unlock_request",
                  subject=body.subject or kind, duration_sec=0, policy_id=dev.policy_applied))
     db.commit()
+    _notify_web(request.app, db, dev.child_id, "request_created", request_id=r.id, kind=kind, minutes=r.minutes, subject=r.subject, message=r.message or "")
     return {"id": r.id, "status": r.status}
 
 
@@ -223,6 +239,12 @@ async def agent_ws(ws: WebSocket, device_id: str):
         return
     await ws.accept()
     await app.state.manager.connect(device_id, ws)
+    def _ws_notify(online_flag: bool):
+        with app.state.SessionLocal() as db:
+            dev = db.get(Device, device_id)
+            if dev:
+                _notify_web(app, db, dev.child_id, "device_status", device_id=device_id, online=online_flag)
+    await run_in_threadpool(_ws_notify, True)
     try:
         # Lấy lệnh tồn đọng SAU khi đã đăng ký kết nối: lệnh tạo trong khoảng giữa không còn bị bỏ sót.
         # Gửi qua manager.send để cùng khóa thứ tự với lệnh mới; Agent khử trùng theo id.
@@ -245,3 +267,7 @@ async def agent_ws(ws: WebSocket, device_id: str):
         pass
     finally:
         app.state.manager.disconnect(device_id, ws)
+        try:
+            await run_in_threadpool(_ws_notify, False)
+        except Exception:
+            pass

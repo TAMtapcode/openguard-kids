@@ -8,7 +8,7 @@ let csrf = "";
 export const serverUrl = () => (isRemote ? LS.getItem("ogk_server") || "" : "");
 export const setServerUrl = u => LS.setItem("ogk_server", u.trim().replace(/\/+$/, ""));
 export const setCsrf = c => { csrf = c || ""; };
-const token = () => (isRemote ? LS.getItem("ogk_token") : null);
+export const getToken = () => (isRemote ? LS.getItem("ogk_token") : null);
 export const setToken = t => (t ? LS.setItem("ogk_token", t) : LS.removeItem("ogk_token"));
 
 export class ApiError extends Error {
@@ -20,17 +20,24 @@ export function normalizeServer(input) {
   if (!u) return "";
   if (!/^https?:\/\//i.test(u)) u = "https://" + u;
   const url = new URL(u);
-  const explicitPort = /^https?:\/\/(\[[^\]]+\]|[^/:]+):\d+/i.test(u);   // URL bỏ cổng mặc định (443) khỏi .port
+  const explicitPort = /^https?:\/\/(\[[^\]]+\]|[^/:]+):\d+/i.test(u);
   if (!explicitPort && url.protocol === "https:") url.port = "8443";
   return url.origin;
+}
+
+export function wsEventsUrl() {
+  const base = serverUrl() || window.location.origin;
+  const wsBase = base.replace(/^http:/i, "ws:").replace(/^https:/i, "wss:");
+  const t = getToken();
+  return `${wsBase}/ws/events${t ? `?token=${encodeURIComponent(t)}` : ""}`;
 }
 
 export async function api(method, path, body) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const t = token();
+  const t = getToken();
   if (t) headers.Authorization = `Bearer ${t}`;
-  else if (!isRemote && csrf && method !== "GET") headers["X-CSRF-Token"] = csrf;   // CSRF chỉ cho phiên cookie
+  else if (!isRemote && csrf && method !== "GET") headers["X-CSRF-Token"] = csrf;
   let r;
   try {
     r = await fetch(serverUrl() + path, { method, headers, credentials: isRemote ? "omit" : "same-origin",

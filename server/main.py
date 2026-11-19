@@ -18,11 +18,11 @@ from .deps import AuthRedirect
 from .models import Base
 from .routers import agent_api, parent_api, web
 from .security import RateLimiter, Vault
-from .ws import ConnectionManager
+from .ws import ConnectionManager, ParentHub
 
 HERE = Path(__file__).resolve().parent
 CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
-       "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+       "connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 NO_UI = ("<!doctype html><meta charset='utf-8'><title>Open Guardian Kids</title>"
          "<p>Giao diện web chưa được build. Chạy <code>cd web &amp;&amp; npm ci &amp;&amp; npm run build</code> rồi khởi động lại máy chủ.</p>")
 
@@ -52,6 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings, app.state.SessionLocal, app.state.engine = settings, SessionLocal, engine
     app.state.categories = CategoryDB(settings.categories_csv)
     app.state.manager = ConnectionManager()
+    app.state.parent_hub = ParentHub()
     app.state.rl_login = RateLimiter(20, 60)
     app.state.rl_enroll = RateLimiter(10, 60)
 

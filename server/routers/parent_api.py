@@ -25,7 +25,7 @@ class ChildIn(BaseModel):
 
 class CommandIn(BaseModel):
     action: str
-    minutes: int = Field(default=15, ge=1, le=240)   # ADD_TIME: số phút cộng thêm; LOCK_NOW: khóa trong bao lâu (tự mở)
+    minutes: int = Field(default=15, ge=1, le=240)
     device_id: str | None = None
 
 
@@ -40,15 +40,28 @@ class ViewerIn(BaseModel):
     password: str
 
 
+def _emit(request: Request, parent_id: int | None, child_id: int | None, event_type: str, **extra):
+    hub = getattr(request.app.state, "parent_hub", None)
+    if hub is not None:
+        hub.notify({"type": event_type, "child_id": child_id, "ts": now(), **extra}, parent_id=parent_id, child_id=child_id)
+
+
 def _child_status(request: Request, db: Session, c: Child) -> dict:
     devs = []
+    pol_ver = services.get_policy_row(db, c).version
     for d in db.scalars(select(Device).where(Device.child_id == c.id, Device.status == "active")):
         devs.append({"id": d.id, "name": d.name, "online": services.is_online(request.app, d), "state": d.state, "ui_ok": d.ui_ok,
                      "used_today_sec": d.used_today_sec, "remaining_sec": d.remaining_sec, "last_seen": d.last_seen,
-                     "policy_ok": d.policy_applied == services.get_policy_row(db, c).version})
+                     "policy_ok": d.policy_applied == pol_ver})
+    pend_rows = list(db.scalars(select(ChildRequest).where(
+        ChildRequest.child_id == c.id, ChildRequest.status == "pending").order_by(ChildRequest.id.desc()).limit(10)))
     pend = db.scalar(select(func.count()).select_from(ChildRequest).where(
         ChildRequest.child_id == c.id, ChildRequest.status == "pending")) or 0
-    return {"id": c.id, "name": c.name, "age": c.age, "devices": devs, "pending_requests": pend}
+    return {
+        "id": c.id, "name": c.name, "age": c.age, "devices": devs, "pending_requests": pend,
+        "pending_items": [{"id": r.id, "kind": r.kind, "subject": r.subject, "minutes": r.minutes,
+                           "message": r.message or "", "created_at": r.created_at} for r in pend_rows],
+    }
 
 
 @router.get("/status")
@@ -65,6 +78,7 @@ def add_child(body: ChildIn, request: Request, user: User = parent_only, db: Ses
     services.get_policy_row(db, c)
     services.audit(db, user.email, client_ip(request), c.id, "child_created", "child", "", c.name)
     db.commit()
+    _emit(request, user.id, c.id, "child_created")
     return {"id": c.id}
 
 
@@ -87,7 +101,7 @@ def enroll_code(cid: int, request: Request, consent: bool = False, user: User = 
 def _cmd_minutes(body: CommandIn) -> int:
     if body.action == "LOCK_NOW":
         return body.minutes if "minutes" in body.model_fields_set else 60
-    if body.action == "UNLOCK":   # mở khóa: nếu máy đang khóa vì hết giờ/ngoài khung giờ, cho dùng tạm chừng này phút
+    if body.action == "UNLOCK":
         return body.minutes if "minutes" in body.model_fields_set else 15
     return body.minutes if body.action == "ADD_TIME" else 0
 
@@ -108,6 +122,7 @@ def command(cid: int, body: CommandIn, request: Request, user: User = parent_onl
         sent += bool(getattr(cmd, "delivered", False))
     services.audit(db, user.email, client_ip(request), child.id, f"command_{body.action}", "", "", str(body.minutes))
     db.commit()
+    _emit(request, user.id, child.id, "command_sent", action=body.action)
     return {"devices": len(devs), "delivered_now": sent}
 
 
@@ -121,6 +136,7 @@ def put_policy(cid: int, data: dict, request: Request, user: User = parent_only,
         raise HTTPException(422, str(e))
     row = services.save_policy(request.app, db, child, new, user.email, client_ip(request))
     db.commit()
+    _emit(request, user.id, child.id, "policy_updated", version=row.version)
     return {"version": row.version}
 
 
@@ -143,7 +159,7 @@ def decide(rid: int, body: DecideIn, request: Request, user: User = parent_only,
     r = db.get(ChildRequest, rid)
     if not r:
         raise HTTPException(404, "Không tìm thấy.")
-    child = owned_child(db, user, r.child_id)  # IDOR: yêu cầu phải thuộc con của phụ huynh này
+    child = owned_child(db, user, r.child_id)
     if r.status != "pending":
         raise HTTPException(409, "Yêu cầu này đã được xử lý.")
     ip = client_ip(request)
@@ -163,6 +179,7 @@ def decide(rid: int, body: DecideIn, request: Request, user: User = parent_only,
         services.save_policy(request.app, db, child, new, user.email, ip)
     services.audit(db, user.email, ip, child.id, "request_decided", r.kind, "pending", r.status)
     db.commit()
+    _emit(request, user.id, child.id, "request_decided", request_id=r.id, status=r.status)
     return {"status": r.status}
 
 
@@ -178,6 +195,7 @@ def list_requests(cid: int, user: User = parent_only, db: Session = Depends(get_
 def delete_data(cid: int, request: Request, user: User = parent_only, db: Session = Depends(get_db)):
     child = owned_child(db, user, cid)
     services.wipe_child_data(request.app, db, child, user.email, client_ip(request))
+    _emit(request, user.id, child.id, "data_wiped")
     return {"ok": True}
 
 
@@ -186,6 +204,7 @@ def delete_child(cid: int, request: Request, user: User = parent_only, db: Sessi
     """Xóa hẳn hồ sơ của con (khác với 'xóa dữ liệu' chỉ dọn hoạt động nhưng giữ hồ sơ)."""
     child = owned_child(db, user, cid)
     services.delete_child(request.app, db, child, user.email, client_ip(request))
+    _emit(request, user.id, cid, "child_deleted")
     return {"ok": True}
 
 
@@ -195,7 +214,8 @@ def revoke(did: str, request: Request, user: User = parent_only, db: Session = D
     dev.status, dev.refresh_hash = "revoked", ""
     services.audit(db, user.email, client_ip(request), dev.child_id, "device_revoked", "device", dev.id, "revoked")
     db.commit()
-    request.app.state.manager.kick(dev.id)   # ngắt WS ngay, không chờ máy con tự phát hiện
+    request.app.state.manager.kick(dev.id)
+    _emit(request, user.id, dev.child_id, "device_revoked", device_id=dev.id)
     return {"ok": True}
 
 

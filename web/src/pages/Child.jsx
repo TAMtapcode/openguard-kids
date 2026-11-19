@@ -1,29 +1,44 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api.js";
-import { AuditTable, dt, Loading, Meters, UsageChart, useToast } from "../ui.jsx";
+import { AuditTable, dt, LiveBadge, Loading, Meters, UsageChart, usePoll, useToast } from "../ui.jsx";
 import { ChildCard, useStatus } from "./Dashboard.jsx";
 import PolicyEditor from "./Policy.jsx";
 
-const TABS = [["live", "Trực tiếp"], ["report", "Báo cáo"], ["inbox", "Yêu cầu"], ["policy", "Luật & lịch"], ["devices", "Thiết bị"], ["audit", "Nhật ký"], ["data", "Dữ liệu"]];
+const TABS = [["live", "Trực tiếp"], ["inbox", "Yêu cầu"], ["report", "Báo cáo"], ["policy", "Luật & lịch"], ["devices", "Thiết bị"], ["audit", "Nhật ký"], ["data", "Dữ liệu"]];
 
-function Inbox({ items, reload }) {
+function Inbox({ items, reload, compact = false }) {
   const toast = useToast();
+  const [busyId, setBusyId] = useState(null);
+  const shown = compact ? items.filter(r => r.status === "pending") : items;
+  if (compact && !shown.length) return null;
   const decide = async (r, approve) => {
-    try { await api("POST", `/api/parent/requests/${r.id}/decide`, { approve, minutes: approve ? r.minutes || null : null }); toast("Đã phản hồi con."); reload(); }
-    catch (e) { toast(e.message, true); }
+    setBusyId(r.id);
+    try {
+      await api("POST", `/api/parent/requests/${r.id}/decide`, { approve, minutes: approve ? r.minutes || null : null });
+      toast(approve ? "Đã đồng ý yêu cầu của con." : "Đã từ chối yêu cầu của con.");
+      reload();
+    } catch (e) { toast(e.message, true); }
+    finally { setBusyId(null); }
   };
   return (
-    <section className="panel"><h2>Hộp thư yêu cầu của con</h2>
-      {!items.length && <p className="muted">Con chưa gửi yêu cầu nào.</p>}
-      {items.map(r => (
+    <section className={"panel" + (compact ? " highlight-inbox" : "")}>
+      <div className="panel-head">
+        <h2>{compact ? `🔔 Yêu cầu đang chờ (${shown.length})` : "Hộp thư yêu cầu của con"}</h2>
+        {!compact && <span className="muted" style={{ fontSize: ".85rem" }}>Tự cập nhật khi có yêu cầu mới</span>}
+      </div>
+      {!shown.length && <p className="muted">Con chưa gửi yêu cầu nào.</p>}
+      {shown.map(r => (
         <div className={"req " + r.status} key={r.id}>
-          <div><b>{r.kind === "add-time" ? `Xin thêm ${r.minutes} phút` : `Báo chặn nhầm: ${r.subject}`}</b>
-            <span className="muted"> · {dt(r.created_at)}</span>{r.message && <p>“{r.message}”</p>}</div>
+          <div>
+            <b>{r.kind === "add-time" ? `⏰ Xin thêm ${r.minutes} phút` : `🔓 Báo chặn nhầm: ${r.subject}`}</b>
+            <span className="muted"> · {dt(r.created_at)}</span>
+            {r.message && <p>“{r.message}”</p>}
+          </div>
           {r.status === "pending" ? (
             <div className="row">
-              <button className="btn primary" type="button" onClick={() => decide(r, true)}>Đồng ý</button>
-              <button className="btn ghost" type="button" onClick={() => decide(r, false)}>Từ chối</button>
+              <button className="btn primary sm" type="button" disabled={busyId === r.id} onClick={() => decide(r, true)}>✓ Đồng ý</button>
+              <button className="btn ghost sm" type="button" disabled={busyId === r.id} onClick={() => decide(r, false)}>Từ chối</button>
             </div>
           ) : <span className={"chip " + r.status}>{r.status === "approved" ? "Đã đồng ý" : "Đã từ chối"}</span>}
         </div>
@@ -61,8 +76,8 @@ function Devices({ o, reload }) {
       {!o.devices.length && <p className="muted">Chưa có thiết bị nào.</p>}
       {o.devices.map(d => (
         <div className="row between" key={d.id}>
-          <span>{d.name} <span className="muted">· ghép đôi {dt(d.enrolled_at)} · {d.status === "active" ? "đang quản lý" : "đã gỡ"}</span></span>
-          {d.status === "active" && <button className="btn ghost" type="button" onClick={() => revoke(d)}>Gỡ thiết bị</button>}
+          <span><b>{d.name}</b> <span className="muted">· ghép đôi {dt(d.enrolled_at)} · {d.status === "active" ? "đang quản lý" : "đã gỡ"}</span></span>
+          {d.status === "active" && <button className="btn ghost sm" type="button" onClick={() => revoke(d)}>Gỡ thiết bị</button>}
         </div>
       ))}
       <h3>Thêm máy tính của con</h3>
@@ -87,24 +102,27 @@ function Devices({ o, reload }) {
   );
 }
 
-
 function DigitalGarden({ report }) {
   const g = report?.garden;
   if (!g) return null;
   const eduTime = g.education_sec || 0, gameTime = g.play_sec || 0, totalTime = g.total_sec || 0;
   let icon = "🌱", message = "Cây đang lớn lên cùng bé.", tone = "ok";
   if (totalTime > 3 * 3600) {
-    icon = "🥀"; message = "Cây đang mệt úa. Bé dùng máy hơi lâu, nhắc bé nghỉ mắt nhé!"; tone = "tired";
+    icon = "🥀"; message = "Cây đang hơi mệt vì bé ngồi máy lâu rồi. Nhắc bé đứng dậy nghỉ mắt nhé!"; tone = "tired";
   } else if (eduTime > gameTime && eduTime > 300) {
-    icon = "🌳"; message = "Cây rất tươi tốt vì hôm nay bé học tập chăm chỉ!"; tone = "lush";
+    icon = "🌳"; message = "Cây xanh mướt vì hôm nay bé học tập rất chăm chỉ!"; tone = "lush";
   }
   return (
     <section className={"panel garden " + tone}>
       <div className="garden-icon" aria-hidden="true">{icon}</div>
-      <div>
+      <div className="garden-body">
         <h3>Khu vườn số <small className="muted">hôm nay</small></h3>
         <p>{message}</p>
-        <p className="muted">📚 Học tập: {Math.round(eduTime / 60)} phút · 🎮 Giải trí & chơi: {Math.round(gameTime / 60)} phút</p>
+        <div className="garden-stats">
+          <span>📚 Học tập: <b>{Math.round(eduTime / 60)} phút</b></span>
+          <span>🎮 Giải trí: <b>{Math.round(gameTime / 60)} phút</b></span>
+          <span>⏱️ Tổng: <b>{Math.round(totalTime / 60)} phút</b></span>
+        </div>
       </div>
     </section>
   );
@@ -117,18 +135,21 @@ export default function Child() {
   const [o, setO] = useState(null);
   const [err, setErr] = useState("");
   const [tab, setTab] = useState(() => window.location.hash.slice(1) || "live");
-  const [kids, loadStatus] = useStatus();
   const load = useCallback(() => api("GET", `/api/parent/children/${id}/overview`).then(setO).catch(e => setErr(e.message)), [id]);
-  useEffect(() => { load(); }, [load]);
+  const [kids, loadStatus, live] = useStatus(ev => {
+    if (!ev || !ev.child_id || String(ev.child_id) === String(id)) load();
+  });
+  usePoll(load, live ? 15000 : 6000, [load, live]);
   useEffect(() => { window.history.replaceState(null, "", `#${tab}`); }, [tab]);
   if (err) return <p className="error">{err}</p>;
   if (!o) return <Loading />;
-  const live = kids && kids.find(c => c.id === o.child.id);
+  const liveChild = kids && kids.find(c => c.id === o.child.id);
   const pending = o.requests.filter(r => r.status === "pending").length;
+  const refreshAll = () => { load(); loadStatus(); };
   const wipe = async () => {
     const typed = window.prompt(`Việc này xóa toàn bộ dữ liệu hoạt động của ${o.child.name} trên máy chủ và máy con, không thể khôi phục.\nGõ tên con để xác nhận:`);
     if (!typed || typed.trim() !== o.child.name) return;
-    try { await api("DELETE", `/api/parent/children/${o.child.id}/data`); toast("Đã xóa dữ liệu hoạt động. Hồ sơ của con vẫn còn."); load(); } catch (e) { toast(e.message, true); }
+    try { await api("DELETE", `/api/parent/children/${o.child.id}/data`); toast("Đã xóa dữ liệu hoạt động. Hồ sơ của con vẫn còn."); refreshAll(); } catch (e) { toast(e.message, true); }
   };
   const removeChild = async () => {
     const typed = window.prompt(`Việc này xóa HẲN hồ sơ của ${o.child.name}: luật, báo cáo, nhật ký, tài khoản xem và gỡ máy của con khỏi quản lý. Không thể khôi phục.\nGõ tên con để xác nhận:`);
@@ -139,19 +160,26 @@ export default function Child() {
     <>
       <header className="page-head">
         <a className="back" href="/" onClick={e => { e.preventDefault(); nav("/"); }}>← Tất cả các con</a>
-        <h1>{o.child.name} <small className="muted">{o.child.age} tuổi</small></h1>
+        <div className="head-row">
+          <h1>{o.child.name} <small className="muted">· {o.child.age} tuổi</small></h1>
+          <LiveBadge live={live} />
+        </div>
         <div className="tabs" role="tablist">
           {TABS.map(([k, v]) => (
-            <button key={k} role="tab" type="button" aria-selected={tab === k} onClick={() => setTab(k)}>{v}{k === "inbox" && pending > 0 && ` (${pending})`}</button>
+            <button key={k} role="tab" type="button" aria-selected={tab === k} onClick={() => setTab(k)}>
+              {v}{k === "inbox" && pending > 0 && <span className="tab-badge">{pending}</span>}
+            </button>
           ))}
         </div>
       </header>
       {tab === "live" && (
         <>
+          <Inbox items={o.requests} reload={refreshAll} compact />
           <DigitalGarden report={o.report} />
-          {live ? <ChildCard c={live} onDone={loadStatus} /> : <p className="muted">Đang tải…</p>}
+          {liveChild ? <ChildCard c={liveChild} onDone={refreshAll} /> : <p className="muted">Đang tải trạng thái máy…</p>}
         </>
       )}
+      {tab === "inbox" && <Inbox items={o.requests} reload={refreshAll} />}
       {tab === "report" && (
         <section className="panel"><h2>7 ngày qua</h2><UsageChart points={o.report.usage} />
           <div className="grid2">
@@ -165,9 +193,8 @@ export default function Child() {
             : <p className="muted">Chưa có cảnh báo, khóa máy hay thay đổi giờ nào.</p>}
         </section>
       )}
-      {tab === "inbox" && <Inbox items={o.requests} reload={load} />}
-      {tab === "policy" && <PolicyEditor cid={o.child.id} policy={o.policy} version={o.version} categories={o.categories} onSaved={load} />}
-      {tab === "devices" && <Devices o={o} reload={load} />}
+      {tab === "policy" && <PolicyEditor cid={o.child.id} policy={o.policy} version={o.version} categories={o.categories} onSaved={refreshAll} />}
+      {tab === "devices" && <Devices o={o} reload={refreshAll} />}
       {tab === "audit" && <section className="panel"><h2>Nhật ký thay đổi <small className="muted">con cũng xem được</small></h2><AuditTable rows={o.audit} withIp /></section>}
       {tab === "data" && (
         <section className="panel danger-zone"><h2>Dữ liệu của con</h2>

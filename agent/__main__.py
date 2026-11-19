@@ -1,13 +1,3 @@
-
-import ctypes, sys
-try:
-    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "OGK_Agent_Single_Instance")
-    if ctypes.windll.kernel32.GetLastError() == 183: # ERROR_ALREADY_EXISTS
-        print("Hệ thống OGK Agent đã chạy ngầm, từ chối bật đè.")
-        sys.exit(0)
-except:
-    pass
-
 """python -m agent <lệnh>
    enroll  --server URL --pin SHA256 --code ABCD2345   Ghép đôi (chạy bằng quyền Administrator)
    run     [--dev]                                     Chạy ở chế độ console (phát triển / chẩn đoán)
@@ -20,6 +10,7 @@ import argparse
 import json
 import sys
 import time
+from pathlib import Path
 
 from .bootstrap import build_engine, enroll, setup_logging
 from .config import VERSION, AgentConfig
@@ -63,7 +54,7 @@ def main(argv=None):
         from . import service
         service.win32serviceutil.HandleCommandLine(service.OGKService, argv=[sys.argv[0], a.action])
         return 0
-    from pathlib import Path
+
     cfg = AgentConfig.load(Path(a.home) if getattr(a, "home", None) else None)
     if a.cmd == "enroll":
         plat = get_platform()
@@ -89,6 +80,11 @@ def main(argv=None):
         print("Đã khôi phục cấu hình DNS gốc.")
         return 0
     if a.cmd == "run":
+        plat = get_platform()
+        mutex_name = f"Local\\OGK_Agent_Run_{abs(hash(str(cfg.home.resolve())))}"
+        if plat.acquire_single_instance(mutex_name) is None:
+            print("Open Guardian Kids Agent đang chạy rồi, không mở thêm bản trùng lặp.")
+            return 0
         if a.dev:
             cfg.manage_system_dns, cfg.dns_port, cfg.require_tray, cfg.allow_insecure = False, 5353, False, True
         setup_logging(cfg, console=True)

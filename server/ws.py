@@ -1,9 +1,12 @@
-"""Quản lý kết nối WebSocket thường trực tới Agent (lệnh khẩn < 5 giây).
+"""Quản lý kết nối WebSocket thường trực tới Agent (lệnh khẩn < 5 giây)
+và kênh đẩy sự kiện thời gian thực tới trình duyệt Phụ huynh / Trẻ (không cần bấm F5).
 
 Đảm bảo thứ tự: mọi khung gửi tới một thiết bị đi qua MỘT khóa asyncio riêng của thiết bị đó,
 nên hai lệnh bấm liên tiếp (Khóa → Mở khóa) không bao giờ bị gửi chồng chéo hay đảo thứ tự
 vì chúng được tạo ở hai luồng threadpool khác nhau.
 """
+from __future__ import annotations
+
 import asyncio
 
 from fastapi import WebSocket
@@ -51,7 +54,7 @@ class ConnectionManager:
                 await asyncio.wait_for(ws.send_json(frame), timeout=3)
                 return True
             except Exception:
-                if self.conns.get(device_id) is ws:   # kết nối chết: bỏ ngay để is_connected không báo sai
+                if self.conns.get(device_id) is ws:
                     self.conns.pop(device_id, None)
                 return False
 
@@ -81,5 +84,66 @@ class ConnectionManager:
             self.disconnect(device_id, ws)
         try:
             asyncio.run_coroutine_threadsafe(_do(), loop).result(timeout=5)
+        except Exception:
+            pass
+
+
+class ParentHub:
+    """Kênh WebSocket thời gian thực đẩy sự kiện tới trình duyệt phụ huynh & tài khoản xem của con."""
+
+    def __init__(self):
+        self.by_parent: dict[int, set[WebSocket]] = {}
+        self.by_child: dict[int, set[WebSocket]] = {}
+        self.loop: asyncio.AbstractEventLoop | None = None
+
+    async def connect(self, ws: WebSocket, parent_id: int | None = None, child_id: int | None = None):
+        self.loop = asyncio.get_running_loop()
+        if parent_id is not None:
+            self.by_parent.setdefault(parent_id, set()).add(ws)
+        if child_id is not None:
+            self.by_child.setdefault(child_id, set()).add(ws)
+
+    def disconnect(self, ws: WebSocket, parent_id: int | None = None, child_id: int | None = None):
+        if parent_id is not None:
+            s = self.by_parent.get(parent_id)
+            if s:
+                s.discard(ws)
+                if not s:
+                    self.by_parent.pop(parent_id, None)
+        if child_id is not None:
+            s = self.by_child.get(child_id)
+            if s:
+                s.discard(ws)
+                if not s:
+                    self.by_child.pop(child_id, None)
+
+    async def _send_many(self, sockets: list[WebSocket], payload: dict):
+        dead = []
+        for ws in sockets:
+            try:
+                await asyncio.wait_for(ws.send_json(payload), timeout=2)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            for d in (self.by_parent, self.by_child):
+                for k in list(d):
+                    d[k].discard(ws)
+                    if not d[k]:
+                        d.pop(k, None)
+
+    def notify(self, payload: dict, parent_id: int | None = None, child_id: int | None = None) -> None:
+        """Gửi sự kiện không chặn tới mọi trình duyệt đang mở (an toàn khi gọi từ luồng đồng bộ)."""
+        loop = self.loop
+        if loop is None or loop.is_closed():
+            return
+        targets: set[WebSocket] = set()
+        if parent_id is not None:
+            targets.update(self.by_parent.get(parent_id, ()))
+        if child_id is not None:
+            targets.update(self.by_child.get(child_id, ()))
+        if not targets:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self._send_many(list(targets), payload), loop)
         except Exception:
             pass

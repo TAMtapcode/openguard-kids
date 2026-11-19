@@ -2,10 +2,12 @@
 Phiên = cookie HttpOnly (khi giao diện chạy cùng máy chủ) hoặc Bearer token (khi giao diện chạy trên Netlify)."""
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -230,3 +232,51 @@ def download_setup(request: Request):
     if not f or not f.exists():
         raise HTTPException(404, "Máy chủ chưa có bộ cài để chia sẻ. Hãy chạy OGK-Setup.exe từ máy của con.")
     return FileResponse(f, filename="OGK-Setup.exe", media_type="application/octet-stream")
+
+
+@router.websocket("/ws/events")
+async def web_events_ws(ws: WebSocket):
+    """Kênh WebSocket đẩy sự kiện thời gian thực cho giao diện Web (phụ huynh & con), bỏ cảnh phải F5."""
+    app = ws.app
+    tok = ws.query_params.get("token") or ""
+    if not tok:
+        auth = ws.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            tok = auth[7:].strip()
+    if not tok:
+        tok = ws.cookies.get(SESSION_COOKIE) or ""
+
+    def _auth_user():
+        if not tok:
+            return None
+        with app.state.SessionLocal() as db:
+            sess = db.get(WebSession, sha256hex(tok))
+            if not sess or sess.expires_at < now():
+                return None
+            u = db.get(User, sess.user_id)
+            if not u or u.disabled:
+                return None
+            return (u.id, u.role, u.child_id)
+
+    info = await run_in_threadpool(_auth_user)
+    if not info:
+        await ws.close(code=4401)
+        return
+    uid, role, cid = info
+    parent_id = uid if role == "parent" else None
+    child_id = cid if role == "child_view" else None
+    await ws.accept()
+    hub = getattr(app.state, "parent_hub", None)
+    if hub is not None:
+        await hub.connect(ws, parent_id=parent_id, child_id=child_id)
+    try:
+        await ws.send_json({"type": "connected", "ts": now()})
+        while True:
+            msg = await asyncio.wait_for(ws.receive_json(), timeout=75)
+            if isinstance(msg, dict) and msg.get("ping"):
+                await ws.send_json({"type": "pong", "ts": now()})
+    except (WebSocketDisconnect, RuntimeError, ValueError, asyncio.TimeoutError):
+        pass
+    finally:
+        if hub is not None:
+            hub.disconnect(ws, parent_id=parent_id, child_id=child_id)
