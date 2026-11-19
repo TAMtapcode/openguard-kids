@@ -54,13 +54,12 @@ class ServerClient:
         self.access_token, self._exp = None, 0.0
         self._lock = threading.Lock()
         self.http = requests.Session()
-        self.http.trust_env = False  # không để biến môi trường/proxy hệ thống làm yếu việc ghim chứng chỉ
+        self.http.trust_env = False
         if u.scheme == "https":
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)  # xác thực bằng ghim, không bằng CA
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             self.http.verify = False
             self.http.mount("https://", _PinAdapter(self.pin))
 
-    # ------------------------------------------------------------- token
     def _refresh(self):
         r = self._send("POST", "/api/v1/token/refresh", json={"device_id": self.device_id, "refresh_token": self.refresh_token}, auth=False)
         if r.status_code == 401:
@@ -68,7 +67,7 @@ class ServerClient:
         r.raise_for_status()
         d = r.json()
         self.access_token, self._exp = d["access_token"], time.monotonic() + d["expires_in"] - 30
-        self.refresh_token = d["refresh_token"]  # xoay vòng
+        self.refresh_token = d["refresh_token"]
         self._on_refresh(self.refresh_token)
 
     def token(self) -> str:
@@ -82,7 +81,7 @@ class ServerClient:
         if auth:
             headers["Authorization"] = f"Bearer {self.token()}"
         if self.scheme == "https":
-            kw["verify"] = False  # xác thực bằng mã ghim (assert_fingerprint), không dựa vào kho CA
+            kw["verify"] = False
         try:
             return self.http.request(method, self.base + path, headers=headers, timeout=self.timeout, **kw)
         except requests.exceptions.SSLError as e:
@@ -100,7 +99,6 @@ class ServerClient:
                 raise AuthLost()
         return r
 
-    # ------------------------------------------------------------- API
     def heartbeat(self, payload):
         r = self.call("POST", "/api/v1/heartbeat", json=payload); r.raise_for_status(); return r.json()
 
@@ -123,6 +121,19 @@ class ServerClient:
     def list_requests(self):
         r = self.call("GET", "/api/v1/requests"); r.raise_for_status(); return r.json()
 
+    def list_tasks(self):
+        r = self.call("GET", "/api/v1/tasks"); r.raise_for_status(); return r.json()
+
+    def submit_task(self, tid: int, note: str = ""):
+        r = self.call("POST", f"/api/v1/tasks/{tid}/submit", json={"note": note})
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("detail")
+            except ValueError:
+                msg = None
+            raise RuntimeError(msg if isinstance(msg, str) else "Không gửi được báo cáo nhiệm vụ.")
+        return r.json()
+
     def audit(self):
         r = self.call("GET", "/api/v1/audit"); r.raise_for_status(); return r.json()
 
@@ -143,7 +154,7 @@ class ServerClient:
 class CommandChannel(threading.Thread):
     """WebSocket thường trực /ws/agent/{device_id}: nhận lệnh khẩn, gửi ack. Tự kết nối lại với backoff."""
 
-    DEAD_AFTER = 55.0   # giây không nhận được gì (kể cả pong) -> coi là kết nối chết, nối lại
+    DEAD_AFTER = 55.0
 
     def __init__(self, client: ServerClient, on_command, on_state=lambda up: None):
         super().__init__(name="ogk-ws", daemon=True)
@@ -176,7 +187,7 @@ class CommandChannel(threading.Thread):
                         raw = ws.recv()
                     except websocket.WebSocketTimeoutException:
                         if time.monotonic() - last_rx > self.DEAD_AFTER:
-                            raise ConnectionError("ws dead")   # máy chủ im lặng quá lâu: nối lại để không mất lệnh
+                            raise ConnectionError("ws dead")
                         ws.send(json.dumps({"ping": 1}))
                         continue
                     if not raw:
@@ -188,7 +199,7 @@ class CommandChannel(threading.Thread):
                         try:
                             ok = bool(self.on_command(msg))
                         except Exception:
-                            ok = False   # lỗi khi áp dụng: KHÔNG ack, để máy chủ giao lại qua heartbeat
+                            ok = False
                         if ok and msg.get("id") is not None:
                             ws.send(json.dumps({"ack": msg["id"]}))
             except Exception:

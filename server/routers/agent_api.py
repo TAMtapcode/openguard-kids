@@ -1,4 +1,4 @@
-"""API cho Agent trên máy trẻ: ghép đôi, token, heartbeat, chính sách, sự kiện, yêu cầu, WebSocket."""
+"""API cho Agent trên máy trẻ: ghép đôi, token, heartbeat, chính sách, sự kiện, yêu cầu, nhiệm vụ thưởng giờ, WebSocket."""
 from __future__ import annotations
 
 import asyncio
@@ -18,10 +18,11 @@ from common.schema import EVENT_TYPES, REQUEST_KINDS, is_valid_subject
 
 from .. import services
 from ..deps import client_ip, current_device, get_db
-from ..models import (AuditLog, Child, ChildRequest, Command, DailyUsage, Device, EnrollCode, Event, now)
+from ..models import (AuditLog, Child, ChildRequest, ChildTask, Command, DailyUsage, Device, EnrollCode, Event, now)
 from ..security import decode_access_token, make_access_token, new_token, sha256hex
 
 router = APIRouter()
+
 
 def _notify_web(app, db: Session, child_id: int, event_type: str, **extra):
     hub = getattr(app.state, "parent_hub", None)
@@ -32,7 +33,6 @@ def _notify_web(app, db: Session, child_id: int, event_type: str, **extra):
         return
     hub.notify({"type": event_type, "child_id": child_id, "child_name": child.name, "ts": now(), **extra},
                parent_id=child.parent_id, child_id=child_id)
-
 
 
 class EnrollIn(BaseModel):
@@ -77,6 +77,10 @@ class RequestIn(BaseModel):
     message: str = Field(default="", max_length=500)
 
 
+class TaskSubmitIn(BaseModel):
+    note: str = Field(default="", max_length=300)
+
+
 def _issue_tokens(request: Request, dev: Device) -> dict:
     s = request.app.state.settings
     refresh = new_token(32)
@@ -113,7 +117,7 @@ def refresh(body: RefreshIn, request: Request, db: Session = Depends(get_db)):
     dev = db.get(Device, body.device_id)
     if not dev or dev.status != "active" or not dev.refresh_hash or dev.refresh_hash != sha256hex(body.refresh_token):
         raise HTTPException(401, "Refresh token không hợp lệ hoặc thiết bị đã bị gỡ.")
-    tokens = _issue_tokens(request, dev)  # xoay vòng refresh token
+    tokens = _issue_tokens(request, dev)
     db.commit()
     return tokens
 
@@ -149,7 +153,7 @@ def events_sync(body: EventsIn, request: Request, dev: Device = Depends(current_
     accepted = dup = rejected = 0
     for e in body.events:
         if e.type not in EVENT_TYPES or (e.subject and not is_valid_subject(e.subject)):
-            rejected += 1  # NT2: không nhận URL đầy đủ / loại sự kiện ngoài lược đồ
+            rejected += 1
             continue
         try:
             with db.begin_nested():
@@ -157,7 +161,7 @@ def events_sync(body: EventsIn, request: Request, dev: Device = Depends(current_
                              subject=e.subject, duration_sec=e.duration_sec, policy_id=e.policy_id))
             accepted += 1
         except IntegrityError:
-            dup += 1  # khử trùng bằng idempotency_key
+            dup += 1
     db.commit()
     if accepted:
         _notify_web(request.app, db, dev.child_id, "activity", accepted=accepted)
@@ -191,6 +195,28 @@ def my_requests(dev: Device = Depends(current_device), db: Session = Depends(get
     rows = db.scalars(select(ChildRequest).where(ChildRequest.child_id == dev.child_id).order_by(ChildRequest.id.desc()).limit(20))
     return [{"id": r.id, "kind": r.kind, "subject": r.subject, "minutes": r.minutes, "status": r.status,
              "response": r.response, "created_at": r.created_at, "decided_at": r.decided_at} for r in rows]
+
+
+@router.get("/api/v1/tasks")
+def my_tasks(dev: Device = Depends(current_device), db: Session = Depends(get_db)):
+    rows = db.scalars(select(ChildTask).where(ChildTask.child_id == dev.child_id).order_by(ChildTask.id.desc()).limit(20))
+    return [{"id": t.id, "title": t.title, "reward_minutes": t.reward_minutes, "status": t.status,
+             "child_note": t.child_note, "created_at": t.created_at} for t in rows]
+
+
+@router.post("/api/v1/tasks/{tid}/submit")
+def submit_task(tid: int, body: TaskSubmitIn, request: Request, dev: Device = Depends(current_device), db: Session = Depends(get_db)):
+    t = db.get(ChildTask, tid)
+    if not t or t.child_id != dev.child_id:
+        raise HTTPException(404, "Không tìm thấy nhiệm vụ.")
+    if t.status not in ("assigned", "submitted"):
+        raise HTTPException(409, "Nhiệm vụ này đã được chốt kết quả.")
+    t.status = "submitted"
+    t.child_note = body.note.strip()
+    t.submitted_at = now()
+    db.commit()
+    _notify_web(request.app, db, dev.child_id, "task_submitted", task_id=t.id, title=t.title, reward_minutes=t.reward_minutes)
+    return {"id": t.id, "status": t.status}
 
 
 @router.get("/api/v1/audit")
@@ -246,12 +272,9 @@ async def agent_ws(ws: WebSocket, device_id: str):
                 _notify_web(app, db, dev.child_id, "device_status", device_id=device_id, online=online_flag)
     await run_in_threadpool(_ws_notify, True)
     try:
-        # Lấy lệnh tồn đọng SAU khi đã đăng ký kết nối: lệnh tạo trong khoảng giữa không còn bị bỏ sót.
-        # Gửi qua manager.send để cùng khóa thứ tự với lệnh mới; Agent khử trùng theo id.
         for f in await run_in_threadpool(_check_and_pending) or []:
             await app.state.manager.send(device_id, f)
         while True:
-            # Agent ping mỗi ~20s; im lặng > 75s nghĩa là kết nối chết -> đóng để Agent nối lại và lệnh không rơi vào khoảng trống.
             msg = await asyncio.wait_for(ws.receive_json(), timeout=75)
             if "ack" in msg:
                 def _ack(cid=int(msg["ack"])):

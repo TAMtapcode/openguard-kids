@@ -134,6 +134,21 @@ class ChildRequest(Base):
     decided_by: Mapped[str] = mapped_column(String(255), default="")
 
 
+class ChildTask(Base):
+    """F1 (CÓ THÌ TỐT): Nhiệm vụ phụ huynh giao -> con báo hoàn thành -> phụ huynh duyệt thưởng giờ."""
+    __tablename__ = "child_tasks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    child_id: Mapped[int] = mapped_column(Integer, index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    reward_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    status: Mapped[str] = mapped_column(String(16), default="assigned")     # assigned | submitted | approved | rejected
+    child_note: Mapped[str] = mapped_column(String(300), default="")
+    created_by: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[int] = mapped_column(BigInteger, default=now)
+    submitted_at: Mapped[int] = mapped_column(BigInteger, default=0)
+    decided_at: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
 class Event(Base):
     __tablename__ = "events"
     id: Mapped[int] = mapped_column(primary_key=True)

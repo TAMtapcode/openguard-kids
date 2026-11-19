@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .. import services
 from ..deps import client_ip, csrf_check, get_db, owned_child, owned_device, require_role
-from ..models import Child, ChildRequest, Device, EnrollCode, User, now
+from ..models import Child, ChildRequest, ChildTask, Device, EnrollCode, User, now
 from common.installcode import make_install_code
 from ..security import hash_password, new_enroll_code, password_problem, sha256hex
 
@@ -38,6 +38,15 @@ class DecideIn(BaseModel):
 class ViewerIn(BaseModel):
     username: str = Field(min_length=3, max_length=60)
     password: str
+
+
+class TaskIn(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    reward_minutes: int = Field(default=15, ge=1, le=180)
+
+
+class TaskDecideIn(BaseModel):
+    approve: bool
 
 
 def _emit(request: Request, parent_id: int | None, child_id: int | None, event_type: str, **extra):
@@ -189,6 +198,46 @@ def list_requests(cid: int, user: User = parent_only, db: Session = Depends(get_
     rows = db.scalars(select(ChildRequest).where(ChildRequest.child_id == child.id).order_by(ChildRequest.id.desc()).limit(50))
     return [{"id": r.id, "kind": r.kind, "subject": r.subject, "minutes": r.minutes, "message": r.message,
              "status": r.status, "created_at": r.created_at} for r in rows]
+
+
+# ---- Nhiệm vụ thưởng giờ (F1 - CÓ THÌ TỐT)
+@router.post("/children/{cid}/tasks", dependencies=[Depends(csrf_check)])
+def create_task(cid: int, body: TaskIn, request: Request, user: User = parent_only, db: Session = Depends(get_db)):
+    child = owned_child(db, user, cid)
+    t = ChildTask(child_id=child.id, title=body.title.strip(), reward_minutes=body.reward_minutes, created_by=user.email)
+    db.add(t)
+    db.flush()
+    services.audit(db, user.email, client_ip(request), child.id, "task_created", "task", "", f"{t.title} (+{t.reward_minutes}p)")
+    db.commit()
+    _emit(request, user.id, child.id, "task_updated", task_id=t.id)
+    return {"id": t.id, "title": t.title, "reward_minutes": t.reward_minutes, "status": t.status}
+
+
+@router.get("/children/{cid}/tasks")
+def list_tasks(cid: int, user: User = parent_only, db: Session = Depends(get_db)):
+    child = owned_child(db, user, cid)
+    rows = db.scalars(select(ChildTask).where(ChildTask.child_id == child.id).order_by(ChildTask.id.desc()).limit(50))
+    return [{"id": t.id, "title": t.title, "reward_minutes": t.reward_minutes, "status": t.status,
+             "child_note": t.child_note, "created_at": t.created_at} for t in rows]
+
+
+@router.post("/tasks/{tid}/decide", dependencies=[Depends(csrf_check)])
+def decide_task(tid: int, body: TaskDecideIn, request: Request, user: User = parent_only, db: Session = Depends(get_db)):
+    t = db.get(ChildTask, tid)
+    if not t:
+        raise HTTPException(404, "Không tìm thấy nhiệm vụ.")
+    child = owned_child(db, user, t.child_id)
+    if t.status in ("approved", "rejected"):
+        raise HTTPException(409, "Nhiệm vụ này đã được chốt kết quả.")
+    t.status = "approved" if body.approve else "rejected"
+    t.decided_at = now()
+    if body.approve:
+        for d in services.active_devices(db, child.id):
+            services.create_command(request.app, db, d, "ADD_TIME", t.reward_minutes, user.email)
+    services.audit(db, user.email, client_ip(request), child.id, "task_decided", t.title, "submitted", f"{t.status} (+{t.reward_minutes}p)")
+    db.commit()
+    _emit(request, user.id, child.id, "task_updated", task_id=t.id, status=t.status)
+    return {"status": t.status, "reward_minutes": t.reward_minutes if body.approve else 0}
 
 
 @router.delete("/children/{cid}/data", dependencies=[Depends(csrf_check)])
