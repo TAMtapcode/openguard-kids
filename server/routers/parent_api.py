@@ -234,3 +234,31 @@ def create_viewer(cid: int, body: ViewerIn, request: Request, user: User = paren
     services.audit(db, user.email, client_ip(request), child.id, "viewer_created", "viewer", "", email)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/server/stop", dependencies=[Depends(csrf_check)])
+def stop_server(request: Request, user: User = parent_only, db: Session = Depends(get_db)):
+    """Dừng dịch vụ máy chủ bảng điều khiển trên máy bố mẹ (chỉ cho phép khi đang truy cập từ chính máy chủ đó)."""
+    host = (request.client.host if request.client else "").strip().lower()
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Chỉ có thể tắt dịch vụ máy chủ trực tiếp trên máy tính của bố mẹ (localhost).")
+    services.audit(db, user.email, client_ip(request), None, "server_stop_requested", "server", "running", "stopping")
+    db.commit()
+    _emit(request, user.id, None, "server_stopping")
+
+    import os, signal, subprocess, sys, threading
+    def _do_stop():
+        import time
+        time.sleep(0.4)
+        if sys.platform == "win32":
+            try:
+                subprocess.run(["sc.exe", "stop", "OpenGuardKidsServer"], capture_output=True, creationflags=0x08000000, timeout=10)
+            except Exception:
+                pass
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+        except Exception:
+            os._exit(0)
+
+    threading.Thread(target=_do_stop, daemon=True).start()
+    return {"ok": True, "message": "Máy chủ bảng điều khiển đang dừng lại. Bấm vào lối tắt ngoài Desktop để bật lại khi cần."}

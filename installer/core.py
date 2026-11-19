@@ -174,9 +174,32 @@ def install_server(s: System, p: Paths, progress: Progress, copy_files: bool = T
             raise InstallError("Bảng điều khiển không khởi động được. Hãy khởi động lại máy rồi chạy lại OGK-Setup.exe.")
         progress(90, "Đang tạo lối tắt…")
         url = f"https://localhost:{p.port}"
-        shortcut = f"[InternetShortcut]\nURL={url}\n"
-        s.write_text(p.public_desktop / "Bảng điều khiển OGK.url", shortcut)
-        s.write_text(p.start_menu / "Bảng điều khiển phụ huynh.url", shortcut)
+        fallback_shortcut = f"[InternetShortcut]\nURL={url}\n"
+        if s.exists(p.exe):
+            cmd_path = p.install_dir / "open_dashboard.cmd"
+            lnk_desktop = p.public_desktop / "Bảng điều khiển OGK.lnk"
+            lnk_menu = p.start_menu / "Bảng điều khiển phụ huynh.lnk"
+            s.write_text(cmd_path, f'@echo off\r\nnet start {SERVICE_SERVER} >nul 2>&1\r\ntimeout /t 1 /nobreak >nul\r\nstart "" "{url}"\r\n')
+            s.write_text(p.public_desktop / "Bảng điều khiển OGK.url", fallback_shortcut)
+            s.write_text(p.start_menu / "Bảng điều khiển phụ huynh.url", fallback_shortcut)
+            ps_lnk = (
+                f'$ws = New-Object -ComObject WScript.Shell; '
+                f'$sc = $ws.CreateShortcut("{lnk_desktop}"); '
+                f'$sc.TargetPath = "{cmd_path}"; '
+                f'$sc.WorkingDirectory = "{p.install_dir}"; '
+                f'$sc.IconLocation = "{p.exe},0"; '
+                f'$sc.Save(); '
+                f'$sm = New-Object -ComObject WScript.Shell; '
+                f'$sc2 = $sm.CreateShortcut("{lnk_menu}"); '
+                f'$sc2.TargetPath = "{cmd_path}"; '
+                f'$sc2.WorkingDirectory = "{p.install_dir}"; '
+                f'$sc2.IconLocation = "{p.exe},0"; '
+                f'$sc2.Save()'
+            )
+            s.run(["powershell", "-NoProfile", "-Command", ps_lnk], timeout=20)
+        else:
+            s.write_text(p.public_desktop / "Bảng điều khiển OGK.url", fallback_shortcut)
+            s.write_text(p.start_menu / "Bảng điều khiển phụ huynh.url", fallback_shortcut)
         register_uninstall(s, p)
         ip = (local_ips() or ["127.0.0.1"])[0]
         progress(100, "Xong!")
@@ -274,6 +297,8 @@ def uninstall(s: System, p: Paths, progress: Progress, keep_data: bool = False):
         s.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule}"])
     s.run(["certutil", "-delstore", "Root", socket.gethostname()])
     s.remove_file(p.public_desktop / "Bảng điều khiển OGK.url")
+    s.remove_file(p.public_desktop / "Bảng điều khiển OGK.lnk")
+    s.remove_file(p.install_dir / "open_dashboard.cmd")
     s.remove_tree(p.start_menu)
     s.run(["ipconfig", "/flushdns"])
     progress(80, "Đang xóa tệp…")
