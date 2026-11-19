@@ -1,5 +1,10 @@
-"""DNS proxy cục bộ 127.0.0.1:53 (UDP + TCP). Chặn theo tên miền & subdomain (trả 0.0.0.0),
-cưỡng chế SafeSearch bằng CNAME, còn lại chuyển nguyên vẹn tới upstream."""
+"""DNS proxy cục bộ 127.0.0.1:53 (UDP + TCP).
+Nâng cấp:
+- Chặn theo tên miền & subdomain (trả 0.0.0.0 cho A, :: cho AAAA, NODATA cho HTTPS/SVCB).
+- Cưỡng chế SafeSearch bằng CNAME (Google, Bing, YouTube, DuckDuckGo, Yandex, Brave).
+- Bộ nhớ đệm LRU tôn trọng TTL (giảm độ trễ phân giải DNS và giữ chính xác theo dõi tên miền).
+- Khử nhiễu truy vấn CDN/tài nguyên ngầm khi ghi nhận tên miền để báo cáo chính xác trang web trẻ mở.
+"""
 from __future__ import annotations
 
 import re
@@ -7,16 +12,28 @@ import socket
 import socketserver
 import struct
 import threading
+import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
 from dnslib import A, AAAA, CNAME, QTYPE, RCODE, RR, DNSRecord
 
 SAFESEARCH = [
     (re.compile(r"^(www\.)?google\.(com|[a-z]{2,3}|com?\.[a-z]{2})$"), "forcesafesearch.google.com"),
-    (re.compile(r"^www\.bing\.com$"), "strict.bing.com"),
+    (re.compile(r"^(www\.)?bing\.com$"), "strict.bing.com"),
     (re.compile(r"^(www|m)\.youtube\.com$|^youtubei\.googleapis\.com$|^www\.youtube-nocookie\.com$"), "restrictmoderate.youtube.com"),
     (re.compile(r"^(www\.)?duckduckgo\.com$"), "safe.duckduckgo.com"),
+    (re.compile(r"^search\.brave\.com$"), "safesearch.brave.com"),
 ]
+
+# Các hậu tố hạ tầng/telemetry không phải tên miền web người dùng chủ động truy cập
+NOISE_SUFFIXES = (
+    ".arpa", ".local", ".internal", ".lan",
+    "windowsupdate.com", "microsoft.com", "msftconnecttest.com", "msftncsi.com",
+    "digicert.com", "ocsp.pki.goog", "crl.globalsign.com", "letsencrypt.org",
+    "googleapis.com", "gstatic.com", "gvt1.com", "gvt2.com",
+    "akadns.net", "akamaiedge.net", "cloudfront.net", "fastly.net", "edgekey.net",
+)
 
 
 def safesearch_target(host: str) -> str | None:
@@ -26,9 +43,51 @@ def safesearch_target(host: str) -> str | None:
     return None
 
 
+def is_noise_domain(host: str) -> bool:
+    h = host.lower().rstrip(".")
+    return any(h == s.lstrip(".") or h.endswith(s) for s in NOISE_SUFFIXES)
+
+
 def _split(up: str):
     host, _, port = up.partition(":")
     return host, int(port) if port else 53
+
+
+class _DnsCache:
+    """LRU cache nhỏ gọn cho bản ghi DNS hợp lệ, khóa theo (qname, qtype)."""
+
+    def __init__(self, maxsize: int = 1024):
+        self.maxsize = maxsize
+        self._data: OrderedDict[tuple[str, str], tuple[float, bytes]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: tuple[str, str], txid: int) -> bytes | None:
+        now = time.monotonic()
+        with self._lock:
+            item = self._data.get(key)
+            if not item:
+                return None
+            exp, payload = item
+            if now >= exp:
+                self._data.pop(key, None)
+                return None
+            self._data.move_to_end(key)
+            # Thay 2 byte đầu bằng Transaction ID của truy vấn mới
+            return struct.pack("!H", txid) + payload[2:]
+
+    def put(self, key: tuple[str, str], resp: bytes, ttl: int):
+        if ttl <= 0 or len(resp) < 12:
+            return
+        exp = time.monotonic() + min(ttl, 300)
+        with self._lock:
+            self._data[key] = (exp, resp)
+            self._data.move_to_end(key)
+            while len(self._data) > self.maxsize:
+                self._data.popitem(last=False)
+
+    def clear(self):
+        with self._lock:
+            self._data.clear()
 
 
 class DnsProxy:
@@ -39,8 +98,12 @@ class DnsProxy:
         self._policy, self.on_block, self.on_query = get_policy, on_block, on_query
         self._sock = self._tcp = None
         self._stop = threading.Event()
-        self._pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="dns")
+        self._pool = ThreadPoolExecutor(max_workers=24, thread_name_prefix="dns")
+        self._cache = _DnsCache(1024)
         self.running = False
+
+    def flush_cache(self):
+        self._cache.clear()
 
     # ------------------------------------------------------------- xử lý một truy vấn
     def handle(self, data: bytes) -> bytes | None:
@@ -59,20 +122,43 @@ class DnsProxy:
                 pass
             reply = req.reply()
             if qtype == "A":
-                reply.add_answer(RR(q.qname, QTYPE.A, rdata=A("0.0.0.0"), ttl=30))
+                reply.add_answer(RR(q.qname, QTYPE.A, rdata=A("0.0.0.0"), ttl=15))
             elif qtype == "AAAA":
-                reply.add_answer(RR(q.qname, QTYPE.AAAA, rdata=AAAA("::"), ttl=30))
+                reply.add_answer(RR(q.qname, QTYPE.AAAA, rdata=AAAA("::"), ttl=15))
+            elif qtype in ("HTTPS", "SVCB"):
+                # Trả NOERROR không bản ghi để trình duyệt không dùng HTTP/3/ECH/DoH hint lách qua
+                pass
             return reply.pack()
+
         pol = self._policy()
-        if pol is not None and pol.safesearch and qtype in ("A", "AAAA") and v.code != "exempt":
+        if pol is not None and pol.safesearch and qtype in ("A", "AAAA", "HTTPS", "SVCB") and v.code != "exempt":
             target = safesearch_target(qname)
             if target:
+                if qtype in ("HTTPS", "SVCB"):
+                    return req.reply().pack()
                 return self._safesearch_reply(req, target, q.qtype)
+
+        if not is_noise_domain(qname):
+            try:
+                self.on_query(qname)
+            except Exception:
+                pass
+
+        cache_key = (qname, qtype)
+        cached = self._cache.get(cache_key, req.header.id)
+        if cached is not None:
+            return cached
+
+        resp = self.forward(data)
         try:
-            self.on_query(qname)
+            parsed = DNSRecord.parse(resp)
+            if parsed.header.rcode == RCODE.NOERROR and parsed.rr:
+                min_ttl = min((rr.ttl for rr in parsed.rr), default=0)
+                if min_ttl > 0:
+                    self._cache.put(cache_key, resp, min_ttl)
         except Exception:
             pass
-        return self.forward(data)
+        return resp
 
     def _safesearch_reply(self, req, target: str, qtype: int) -> bytes:
         reply = req.reply()

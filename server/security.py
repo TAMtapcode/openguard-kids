@@ -1,4 +1,4 @@
-"""Băm mật khẩu Argon2id, mã hoá AES-GCM, JWT, giới hạn tần suất."""
+"""Băm mật khẩu Argon2id, mã hoá AES-GCM, JWT, giới hạn tần suất (F5: mật khẩu tối thiểu 10 ký tự)."""
 from __future__ import annotations
 
 import hashlib
@@ -28,10 +28,12 @@ def verify_password(h: str | None, p: str) -> bool:
         return False
 
 
-PW_MIN = 8
-_COMMON_PW = {"12345678", "123456789", "1234567890", "87654321", "11111111", "00000000", "password", "password1", "password123",
-              "qwertyui", "qwerty123", "abc12345", "abcd1234", "1qaz2wsx", "iloveyou", "matkhau1", "matkhau123", "admin123",
-              "12341234", "123123123", "88888888", "66666666", "11223344", "letmein1", "welcome1"}
+PW_MIN = 10  # F5: Bắt buộc tối thiểu 10 ký tự
+_COMMON_PW = {
+    "1234567890", "0987654321", "1111111111", "0000000000", "password12", "password123",
+    "qwertyuiop", "qwerty1234", "abc1234567", "abcd123456", "1qaz2wsx3e", "iloveyou12",
+    "matkhau123", "matkhau1234", "admin12345", "1231231231", "8888888888", "6666666666",
+}
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,59}$")
 

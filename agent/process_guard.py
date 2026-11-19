@@ -1,17 +1,23 @@
-"""Giám sát tiến trình mỗi giây: đối chiếu TÊN + SHA-256 tệp thực thi (đổi tên file vẫn bị phát hiện)."""
+"""Giám sát tiến trình mỗi giây:
+- Đối chiếu TÊN + SHA-256 tệp thực thi (đổi tên file vẫn bị phát hiện).
+- Nhận diện tên hiển thị thân thiện (friendly_name) và tự động phân nhóm ứng dụng.
+- Kết thúc cả cây tiến trình con (launcher -> game) khi chặn để tránh mở lại ngay lập tức.
+"""
 from __future__ import annotations
 
 import hashlib
 import os
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 
 import psutil
 
+from common.schema import friendly_app_name
+
 PROTECTED_NAMES = frozenset({
     "system", "registry", "smss.exe", "csrss.exe", "wininit.exe", "services.exe", "lsass.exe", "winlogon.exe",
-    "svchost.exe", "explorer.exe", "dwm.exe", "fontdrvhost.exe", "ogk.exe", "ogk-service.exe", "ogk-tray.exe", "systemd", "init",
+    "svchost.exe", "explorer.exe", "dwm.exe", "fontdrvhost.exe", "taskmgr.exe", "conhost.exe", "runtimebroker.exe",
+    "sihost.exe", "ctfmon.exe", "searchhost.exe", "startmenuexperiencehost.exe", "shellexperiencehost.exe",
+    "ogk.exe", "ogk-service.exe", "ogk-tray.exe", "systemd", "init",
 })
 MAX_HASH_BYTES = 1 << 30
 _SYSTEM_ROOTS = [r.lower() for r in (os.environ.get("SystemRoot"), os.environ.get("windir")) if r]
@@ -33,6 +39,7 @@ class Violation:
     reason: str          # blocklist | allowlist | group_budget
     group: str | None
     killed: bool = False
+    display_name: str = ""
 
 
 def sha256_file(path: str) -> str | None:
@@ -58,8 +65,20 @@ def default_source():
 
 
 def default_killer(pid: int) -> bool:
+    """Kết thúc tiến trình vi phạm cùng toàn bộ tiến trình con của nó."""
     try:
         p = psutil.Process(pid)
+        children = []
+        try:
+            children = p.children(recursive=True)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        for child in children:
+            try:
+                if (child.name() or "").lower() not in PROTECTED_NAMES:
+                    child.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
         p.kill()  # Windows: TerminateProcess
         p.wait(timeout=3)
         return True
@@ -133,7 +152,14 @@ class ProcessGuard:
                 if g and self._exhausted(g):
                     reason, group = "group_budget", g
             if reason:
-                v = Violation(pr.pid, pr.name, sha, reason, group or p.app_group(pr.name))
+                v = Violation(
+                    pr.pid,
+                    pr.name,
+                    sha,
+                    reason,
+                    group or p.app_group(pr.name),
+                    display_name=friendly_app_name(pr.name),
+                )
                 v.killed = self._killer(pr.pid)
                 if v.killed:
                     self._handled.add(ident)
