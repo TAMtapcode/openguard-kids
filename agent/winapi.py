@@ -12,6 +12,8 @@ IS_WIN = sys.platform == "win32"
 CREATE_NO_WINDOW = 0x08000000
 
 SID_SYSTEM, SID_ADMINS, SID_USERS = "*S-1-5-18", "*S-1-5-32-544", "*S-1-5-32-545"
+DNS_BYPASS_FW_RULES = ("OGK Block DoT 853", "OGK Block Public DNS")
+PUBLIC_DNS_IPS = "1.1.1.1,1.0.0.1,8.8.8.8,8.8.4.4,9.9.9.9,149.112.112.112,208.67.222.222,208.67.220.220"
 
 
 class Platform:
@@ -227,15 +229,44 @@ class WindowsPlatform(Platform):
                            creationflags=CREATE_NO_WINDOW, timeout=60)
         return r.stdout
 
+    def _set_dns_firewall(self, block: bool) -> None:
+        """Chặn DNS-over-TLS (cổng 853) và truy vấn trực tiếp tới DNS công cộng ngoài 127.0.0.1."""
+        for rule in DNS_BYPASS_FW_RULES:
+            subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule}"],
+                           capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
+        if block:
+            subprocess.run([
+                "netsh", "advfirewall", "firewall", "add", "rule",
+                f"name={DNS_BYPASS_FW_RULES[0]}", "dir=out", "action=block", "protocol=TCP", "remoteport=853",
+            ], capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
+            # Chỉ chặn các tiến trình người dùng (không chặn chính service LocalSystem để upstream DNS vẫn hoạt động)
+            exe_path = sys.executable
+            subprocess.run([
+                "netsh", "advfirewall", "firewall", "add", "rule",
+                f"name={DNS_BYPASS_FW_RULES[1]}", "dir=out", "action=block", "protocol=UDP",
+                "remoteport=53", f"remoteip={PUBLIC_DNS_IPS}",
+            ], capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
+            if exe_path:
+                subprocess.run([
+                    "netsh", "advfirewall", "firewall", "add", "rule",
+                    "name=OGK Allow Upstream DNS", "dir=out", "action=allow", "protocol=UDP",
+                    "remoteport=53", f"program={exe_path}",
+                ], capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
+        else:
+            subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", "name=OGK Allow Upstream DNS"],
+                           capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
+
     def set_dns_loopback(self, state_file: Path) -> bool:
         if not Path(state_file).exists():
             out = self._ps("Get-DnsClientServerAddress -AddressFamily IPv4 | Select-Object InterfaceIndex,ServerAddresses | ConvertTo-Json -Compress")
             Path(state_file).write_text(out or "[]", encoding="utf-8")
         self._ps("Get-NetAdapter | Where-Object Status -eq 'Up' | ForEach-Object "
                  "{ Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ServerAddresses 127.0.0.1 }")
+        self._set_dns_firewall(True)
         return True
 
     def restore_dns(self, state_file: Path) -> None:
+        self._set_dns_firewall(False)
         sf = Path(state_file)
         try:
             data = json.loads(sf.read_text(encoding="utf-8") or "[]") if sf.exists() else []
@@ -254,15 +285,21 @@ class WindowsPlatform(Platform):
         sf.unlink(missing_ok=True)
 
     def set_browser_doh_policy(self, block: bool) -> None:
-        """Chính sách công khai (xem được ở chrome://policy, edge://policy): tắt DoH để DNS proxy không bị vượt qua."""
+        """Chính sách công khai (xem được ở chrome://policy, edge://policy, about:policies): tắt DoH để DNS proxy không bị vượt qua."""
         import winreg
-        keys = [(r"SOFTWARE\Policies\Google\Chrome", "DnsOverHttpsMode", "off"),
-                (r"SOFTWARE\Policies\Microsoft\Edge", "DnsOverHttpsMode", "off")]
+        keys = [
+            (r"SOFTWARE\Policies\Google\Chrome", "DnsOverHttpsMode", "off"),
+            (r"SOFTWARE\Policies\Microsoft\Edge", "DnsOverHttpsMode", "off"),
+            (r"SOFTWARE\Policies\BraveSoftware\Brave", "DnsOverHttpsMode", "off"),
+            (r"SOFTWARE\Policies\Mozilla\Firefox\DNSOverHTTPS", "Enabled", 0),
+            (r"SOFTWARE\Policies\Mozilla\Firefox\DNSOverHTTPS", "Locked", 1),
+        ]
         for path, name, val in keys:
             try:
                 if block:
                     with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE) as k:
-                        winreg.SetValueEx(k, name, 0, winreg.REG_SZ, val)
+                        kind = winreg.REG_DWORD if isinstance(val, int) else winreg.REG_SZ
+                        winreg.SetValueEx(k, name, 0, kind, val)
                 else:
                     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE) as k:
                         winreg.DeleteValue(k, name)

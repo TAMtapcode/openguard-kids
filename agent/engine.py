@@ -10,7 +10,7 @@ import time
 from collections import deque
 from urllib.parse import urlparse
 
-from common.schema import CATEGORIES, is_valid_subject, second_level_domain
+from common.schema import BROWSER_PROCESSES, CATEGORIES, friendly_app_name, is_valid_subject, second_level_domain
 from common.signing import verify
 
 from .classifier import DomainFilter
@@ -27,9 +27,10 @@ log = logging.getLogger("ogk")
 IGNORED_APPS = {"explorer.exe", "searchhost.exe", "lockapp.exe", "shellexperiencehost.exe", "startmenuexperiencehost.exe",
                 "pythonw.exe", "ogk.exe", "ogk-tray.exe", "applicationframehost.exe", "textinputhost.exe"}
 DOMAIN_WINDOW = 120.0      # giây: hai truy vấn cùng tên miền cách nhau < 120s được coi là đang xem liên tục
+BROWSER_ACTIVE_WINDOW = 90.0  # giây: duy trì đếm tên miền gần nhất khi trình duyệt vẫn đang ở tiền cảnh & có thao tác
 RESTORE_BREAK = 300.0      # nghỉ >= 5 phút thì tính lại thời gian dùng liên tục
 EYE_BREAK = 3600.0
-MANUAL_LOCK_MIN = 60       # phút: "Khóa ngay" tự mở sau thời gian này để máy không bao giờ bị kẹt khóa         # nhắc nghỉ mắt sau 60 phút dùng liên tục
+MANUAL_LOCK_MIN = 60       # phút: "Khóa ngay" tự mở sau thời gian này để máy không bao giờ bị kẹt khóa
 
 
 class Engine:
@@ -39,7 +40,7 @@ class Engine:
         self.cfg, self.mono, self.server, self.policy_key = cfg, mono, server, policy_key
         self.store = store or AgentStore(cfg.db_path)
         if cfg.device_id and self.store.kv_get("cmd_device_id") != cfg.device_id:
-            self.store.reset_commands()   # ghép đôi mới: id lệnh của máy chủ mới bắt đầu lại, không được so với id cũ
+            self.store.reset_commands()
             self.store.kv_set("cmd_device_id", cfg.device_id)
         self.platform = platform or get_platform()
         self.clock = clock or TrustedClock(self.store, mono=mono)
@@ -57,11 +58,13 @@ class Engine:
         self._ui_missing_since = None
         self._last_tray_launch = -1e9
         self.suspended = False
-        self.applies = True   # False khi đang dùng tài khoản Windows không thuộc diện quản lý (ví dụ tài khoản của bố mẹ)
+        self.applies = True
         self._last_active = -1e9
         self._dom_groups: dict = {}
         self._dom_last: dict = {}
         self._dom_agg: dict = {}
+        self._active_dom: str | None = None
+        self._active_dom_ts: float = -1e9
         self._app_cur, self._app_seg = None, 0.0
         self._cont, self._inactive, self._eye_t = 0.0, 0.0, 0.0
         self._last_flush = self._last_slow = mono()
@@ -135,8 +138,9 @@ class Engine:
                 return False
             self.store.kv_set("policy_env", json.dumps(env))
             self.policy = Policy(doc)
-            self.platform.flush_dns()  # luật chặn web có hiệu lực ngay
-            self._wake.set()           # báo ngay phiên bản đã áp dụng cho máy chủ (không đợi nhịp 60s)
+            self.dns.flush_cache()
+            self.platform.flush_dns()
+            self._wake.set()
             self.notify("policy", "Luật mới đã được áp dụng", f"Phiên bản luật {self.policy.version}. Bạn có thể xem ai đã đổi gì trong mục “Nhật ký luật”.")
             return True
 
@@ -149,13 +153,13 @@ class Engine:
             ui_ok = self._ui_state()
             self.suspended = (not ui_ok) and self._ui_missing_since is not None and mono - self._ui_missing_since > self.cfg.ui_grace_sec
             dt_local, day = self._parts()
-            active = self._user_active() and self.decision.state != "locked"   # màn hình khóa đang che: không trừ giờ
+            active = self._user_active() and self.decision.state != "locked"
             fg = self._foreground() if active else None
             groups = self._active_groups(active, fg, mono)
             dt = self.acc.tick(day, active, groups)
             if active:
                 self._last_active = mono
-            self._track(day, active, fg, dt)
+            self._track(day, active, fg, dt, mono)
             self._enforce(day, dt_local)
             if self.enrolled and not self.suspended:
                 self._scan_processes()
@@ -172,12 +176,10 @@ class Engine:
         return self.telemetry["ts"] is not None and self.mono() - self.telemetry["ts"] < 10
 
     def _user_is_monitored(self) -> bool:
-        """Máy dùng chung: chỉ tài khoản Windows của con bị tính giờ/chặn. Rỗng = áp dụng cho mọi tài khoản."""
         users = {u.split("\\")[-1].lower() for u in self.cfg.monitored_users}
         return not users or self.platform.active_user().split("\\")[-1].lower() in users
 
     def _ui_state(self) -> bool:
-        """NT1: phải có biểu tượng khay. Thiếu -> thử bật lại; vẫn thiếu quá hạn -> agent tự dừng chặn và báo phụ huynh."""
         if not self.applies or not self.cfg.require_tray or not self.platform.has_user_session():
             self._ui_missing_since = None
             return True
@@ -200,7 +202,7 @@ class Engine:
         if self._fresh_tel():
             locked, idle = self.telemetry["locked"], self.telemetry["idle"]
         elif self.cfg.require_tray:
-            locked, idle = False, 0.0   # chưa có số liệu từ khay: coi là đang dùng (không để tắt khay thành cách né giờ)
+            locked, idle = False, 0.0
         else:
             locked, idle = self.platform.session_locked(), self.platform.idle_seconds()
         limit = self.policy.idle_seconds if self.policy else 300
@@ -221,7 +223,8 @@ class Engine:
         g |= {c for c, t in self._dom_groups.items() if mono - t < DOMAIN_WINDOW}
         return g
 
-    def _track(self, day, active, fg, dt):
+    def _track(self, day, active, fg, dt, mono=None):
+        mono = self.mono() if mono is None else mono
         name = fg if (active and fg and fg not in IGNORED_APPS) else None
         if name != self._app_cur:
             self._flush_app()
@@ -231,6 +234,15 @@ class Engine:
         if name and dt:
             self._app_seg += dt
             self.acc.add(day, f"app:{name}", dt)
+
+        # Kết hợp tín hiệu DNS với ngữ cảnh trình duyệt đang ở tiền cảnh để tính thời lượng web chính xác hơn
+        if active and dt and fg and fg.lower() in BROWSER_PROCESSES:
+            if self._active_dom and (mono - self._active_dom_ts) <= BROWSER_ACTIVE_WINDOW:
+                agg = self._dom_agg.setdefault(self._active_dom, [0.0, 0])
+                agg[0] += dt
+                self.acc.add(day, f"dom:{self._active_dom}", dt)
+                self._dom_last[self._active_dom] = mono
+
         if active:
             self._cont += dt
             self._inactive = 0.0
@@ -249,7 +261,7 @@ class Engine:
 
     def _flush_domains(self):
         for sld, (sec, cnt) in list(self._dom_agg.items()):
-            if cnt:
+            if cnt or sec >= 1:
                 self.event("domain_query", sld, int(sec))
         self._dom_agg.clear()
 
@@ -258,11 +270,10 @@ class Engine:
         if not (self.policy and self.enrolled) or self.suspended or not self.applies:
             prev, self.decision = self.decision, Decision(state="suspended" if self.suspended else "ok")
             return
-        manual = float(self.store.kv_get("manual_lock_until", "0") or 0) > self.clock.now()   # lệnh khóa tay luôn tự hết hạn
+        manual = float(self.store.kv_get("manual_lock_until", "0") or 0) > self.clock.now()
         prev = self.decision
         ov_left = float(self.store.kv_get("unlock_override_until", "0") or 0) - self.clock.now()
         if not manual and ov_left > 0:
-            # Bố mẹ bấm "Mở khóa" khi máy đang khóa vì hết giờ/ngoài khung giờ: cho dùng tạm, hết thì ân hạn rồi khóa lại.
             self.enforcer.reset("ok")
             self.decision = Decision(state="ok", remaining_sec=ov_left, limit_sec=self.decision.limit_sec)
             return
@@ -282,7 +293,7 @@ class Engine:
                 self.notify("locked", "Máy đang khóa", self._lock_text(dec.reason), reason=dec.reason, can_request=True,
                             emergency="Cần giúp đỡ khẩn cấp? Gọi Tổng đài quốc gia bảo vệ trẻ em 111 hoặc nhờ người lớn.")
                 if self.platform.has_user_session():
-                    self.platform.lock_session()   # chỉ báo một lần; màn hình khóa do khay hiển thị, KHÔNG ngắt phiên Windows
+                    self.platform.lock_session()
 
     @staticmethod
     def _lock_text(reason):
@@ -299,6 +310,7 @@ class Engine:
     def _scan_processes(self):
         for v in self.guard.scan():
             label = CATEGORIES.get(v.group or "", None)
+            disp = v.display_name or friendly_app_name(v.name)
             if v.reason == "allowlist":
                 why, by = "Chỉ các ứng dụng trong danh sách cho phép mới được mở.", f"Phụ huynh ({self.policy.set_by})"
             elif v.reason == "group_budget":
@@ -307,8 +319,8 @@ class Engine:
                 why, by = "Ứng dụng này nằm trong danh sách chặn.", f"Phụ huynh ({self.policy.set_by})"
             self.event("blocked_app", v.name)
             if self._rate_ok(("app", v.name), 10):
-                self.notify("blocked", "Ứng dụng đã bị đóng", why, subject=v.name, category=label or "Chưa phân loại", by=by,
-                            kind_of="app", can_request=True, killed=v.killed)
+                self.notify("blocked", "Ứng dụng đã bị đóng", why, subject=disp, raw_subject=v.name,
+                            category=label or "Chưa phân loại", by=by, kind_of="app", can_request=True, killed=v.killed)
 
     def _on_dns_block(self, v, qname):
         sld = second_level_domain(qname)
@@ -325,14 +337,19 @@ class Engine:
             sld = second_level_domain(qname)
             cat = self.policy.category_of(qname) if self.policy else "uncategorized"
             if mono - self._last_active > 60:
-                return   # truy vấn nền khi trẻ không thao tác: không tính vào thời lượng
+                return
             self._dom_groups[cat] = mono
+            self._active_dom = sld
+            self._active_dom_ts = mono
             agg = self._dom_agg.setdefault(sld, [0.0, 0])
             agg[1] += 1
-            last = self._dom_last.get(sld)
-            if last is not None and mono - last < DOMAIN_WINDOW:
-                agg[0] += mono - last
-                self.acc.add(self._parts()[1], f"dom:{sld}", mono - last)
+            # Nếu trình duyệt đang không ở tiền cảnh, vẫn dùng khoảng cách DNS truyền thống làm dự phòng
+            fg = (self._foreground() or "").lower()
+            if fg not in BROWSER_PROCESSES:
+                last = self._dom_last.get(sld)
+                if last is not None and mono - last < DOMAIN_WINDOW:
+                    agg[0] += mono - last
+                    self.acc.add(self._parts()[1], f"dom:{sld}", mono - last)
             self._dom_last[sld] = mono
 
     def _housekeeping(self, mono, day):
@@ -354,15 +371,12 @@ class Engine:
 
     # ================================================================= lệnh khẩn
     def handle_command(self, cmd: dict) -> bool:
-        """Áp dụng lệnh khẩn. Trả True nếu lệnh đã xử lý xong (hoặc đã xử lý trước đó) -> mới được ack."""
         with self.lock:
             cid, act = cmd.get("id"), cmd.get("action")
             if cid is not None and self.store.command_applied(cid):
                 return True
             _, day = self._parts()
             if act in ("LOCK_NOW", "UNLOCK") and cid is not None:
-                # Lệnh trạng thái: lệnh có id nhỏ hơn lệnh Khóa/Mở khóa đã áp dụng là lệnh CŨ đến muộn
-                # (WS và heartbeat là hai đường độc lập) -> bỏ qua, nếu không máy sẽ lại bị khóa/mở sai.
                 last = int(self.store.kv_get("state_cmd_seq", "0") or 0)
                 if int(cid) < last:
                     self.store.mark_command(cid)
@@ -376,7 +390,7 @@ class Engine:
             elif act == "UNLOCK":
                 self.store.kv_set("manual_lock_until", "0")
                 self.store.kv_set("unlock_override_until", "0")
-                self.enforce_now()   # gỡ khóa tay xong mà vẫn bị khóa vì hết giờ/ngoài khung giờ thì "Mở khóa" phải có tác dụng thật
+                self.enforce_now()
                 if self.decision.state in ("locked", "grace") and self.decision.reason in ("quota", "schedule"):
                     mins = max(1, min(int(cmd.get("minutes") or 15), 240))
                     self.store.kv_set("unlock_override_until", f"{self.clock.now() + mins * 60:.0f}")
@@ -399,7 +413,7 @@ class Engine:
             if cid is not None:
                 self.store.mark_command(cid)
             self.enforce_now()
-            self._wake.set()   # báo trạng thái mới lên máy chủ NGAY (bảng điều khiển không phải chờ nhịp 60 giây)
+            self._wake.set()
             return True
 
     def flush_all(self):
@@ -475,7 +489,7 @@ class Engine:
             batch = self.store.pending_events(200)
             if not batch:
                 return
-            self.server.post_events(batch)          # máy chủ khử trùng bằng idempotency key
+            self.server.post_events(batch)
             self.store.delete_events([e["idem_key"] for e in batch])
 
     def _flush_outbox(self):
@@ -485,13 +499,12 @@ class Engine:
             try:
                 self.server.post_request(item["kind"], item["body"])
             except RuntimeError:
-                continue           # bị từ chối (ví dụ gửi quá nhanh): bỏ, không kẹt hàng đợi
+                continue
             except Offline:
                 left.append(item)
         self.store.kv_set("outbox", json.dumps(left))
 
     def unenroll(self):
-        """Thiết bị bị phụ huynh gỡ: ngừng áp luật, trả lại DNS, báo cho trẻ biết (minh bạch)."""
         with self.lock:
             if not self.enrolled:
                 return
@@ -528,8 +541,15 @@ class Engine:
         with self.lock:
             _, day = self._parts()
             c = self.acc.counters_view(day)
-            top = lambda pre: sorted(((k[len(pre):], int(v)) for k, v in c if k.startswith(pre) and v >= 1), key=lambda x: -x[1])[:10]
-            return {"day": day, "apps": top("app:"), "domains": top("dom:"), "total_sec": int(self.acc.get(day, "total"))}
+            top_apps = sorted(
+                ((friendly_app_name(k[4:]), int(v)) for k, v in c if k.startswith("app:") and v >= 1),
+                key=lambda x: -x[1],
+            )[:10]
+            top_doms = sorted(
+                ((k[4:], int(v)) for k, v in c if k.startswith("dom:") and v >= 1),
+                key=lambda x: -x[1],
+            )[:10]
+            return {"day": day, "apps": top_apps, "domains": top_doms, "total_sec": int(self.acc.get(day, "total"))}
 
     def send_request(self, kind: str, subject: str, minutes: int, message: str):
         if kind not in ("add-time", "false-block"):

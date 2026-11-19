@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
-from common.schema import CATEGORIES, COMMAND_ACTIONS, DEFAULT_APP_GROUPS
+from common.schema import CATEGORIES, COMMAND_ACTIONS, DEFAULT_APP_GROUPS, friendly_app_name
 from common.signing import sign
 
 from .models import (AuditLog, Child, ChildRequest, Command, DailyUsage, Device, EnrollCode, Event,
@@ -23,11 +23,20 @@ DAYS_VI = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Ch
 CMD_TTL = {"LOCK_NOW": 600, "UNLOCK": 600, "ADD_TIME": 86400, "WIPE_LOCAL": 7 * 86400, "POLICY_UPDATED": 600}
 
 
+def _display_subject(subject: str, etype: str = "") -> str:
+    s = (subject or "").strip()
+    if not s:
+        return s
+    if etype in ("app_start", "app_stop", "blocked_app") or s.lower().endswith(".exe"):
+        return friendly_app_name(s)
+    return s
+
+
 # ---------------------------------------------------------------- chính sách
 def default_policy(child: Child) -> dict:
-    young = child.age <= 11  # mặc định cho trẻ 6-11 tuổi
-    wd = [1 if 12 <= s < 42 else 0 for s in range(48)]  # 06:00-21:00
-    we = [1 if 14 <= s < 43 else 0 for s in range(48)]  # 07:00-21:30
+    young = child.age <= 11
+    wd = [1 if 12 <= s < 42 else 0 for s in range(48)]
+    we = [1 if 14 <= s < 43 else 0 for s in range(48)]
     blocked = ["social", "inappropriate"] if young else ["inappropriate"]
     return {
         "tz_offset_min": 420,
@@ -70,7 +79,6 @@ def _domains(lst, label):
 
 
 def validate_policy_update(cur: dict, data: dict) -> dict:
-    """Trả về chính sách mới đã làm sạch; ném ValueError (tiếng Việt) nếu dữ liệu sai."""
     new = json.loads(json.dumps(cur))
     if "quota" in data:
         q = data["quota"] or {}
@@ -125,7 +133,7 @@ def validate_policy_update(cur: dict, data: dict) -> dict:
                           "block_doh": bool(d.get("block_doh", cur["domains"]["block_doh"])),
                           "safesearch": bool(d.get("safesearch", cur["domains"]["safesearch"]))}
         if set(new["domains"]["blocked_categories"]) != set(cur["domains"]["blocked_categories"]):
-            new["meta"]["system_categories"] = []  # phụ huynh đã tuỳ chỉnh -> không còn là mặc định hệ thống
+            new["meta"]["system_categories"] = []
     if "learn_to_play" in data:
         l = data["learn_to_play"] or {}
         try:
@@ -145,7 +153,7 @@ def _flatten(d, prefix=""):
     out = {}
     for k, v in d.items():
         if k == "meta":
-            continue  # siêu dữ liệu nội bộ, không đưa vào nhật ký kiểm toán
+            continue
         if isinstance(v, dict):
             out.update(_flatten(v, f"{prefix}{k}."))
         else:
@@ -181,7 +189,7 @@ def save_policy(app, db: Session, child: Child, new_doc: dict, actor: str, ip: s
     row.version += 1
     row.updated_at, row.updated_by = now(), actor
     db.flush()
-    for dev in active_devices(db, child.id):  # hiệu lực sớm: đẩy tín hiệu qua WS; nếu không, heartbeat 60s sẽ kéo về
+    for dev in active_devices(db, child.id):
         create_command(app, db, dev, "POLICY_UPDATED", 0, actor)
     return row
 
@@ -210,26 +218,24 @@ def is_online(app, dev: Device) -> bool:
     return app.state.manager.is_connected(dev.id) or (now() - dev.last_seen) <= app.state.settings.online_window_sec
 
 
-STATE_CMDS = ("LOCK_NOW", "UNLOCK")   # lệnh "trạng thái": lệnh mới luôn thay thế lệnh cũ chưa xong
+STATE_CMDS = ("LOCK_NOW", "UNLOCK")
 
 
 def create_command(app, db: Session, device: Device, action: str, minutes: int, actor: str) -> Command:
     assert action in COMMAND_ACTIONS
     if action in STATE_CMDS:
-        # Khóa/Mở khóa là lệnh trạng thái: lệnh cũ chưa được ack không còn ý nghĩa và KHÔNG được phát lại
-        # (nếu phát lại sau lệnh mới sẽ làm đảo kết quả, ví dụ máy lại bị khóa sau khi đã mở).
         db.execute(update(Command).where(Command.device_id == device.id, Command.action.in_(STATE_CMDS),
                                          Command.status != "acked").values(status="acked", acked_at=now()))
     cmd = Command(device_id=device.id, action=action, minutes=minutes, created_by=actor, created_at=now())
     db.add(cmd)
     db.flush()
     frame = command_frame(cmd)
-    db.commit()  # phải commit trước khi đẩy: Agent có thể ack ngay
-    cmd.delivered = False   # thuộc tính tạm: đã đẩy tới Agent qua WS (kể cả khi Agent ack nhanh hơn ta kịp ghi "sent")
+    db.commit()
+    cmd.delivered = False
     if app.state.manager.push(device.id, frame):
         cmd.delivered = True
         db.execute(update(Command).where(Command.id == frame["id"], Command.status == "pending").values(status="sent"))
-        db.commit()   # chỉ nâng pending -> sent, không bao giờ ghi đè "acked" mà Agent vừa gửi
+        db.commit()
     return cmd
 
 
@@ -254,11 +260,9 @@ def wipe_child_data(app, db: Session, child: Child, actor: str, ip: str):
 
 
 def delete_child(app, db: Session, child: Child, actor: str, ip: str):
-    """Xóa HẲN hồ sơ của con: thiết bị, luật, sự kiện, báo cáo, yêu cầu, tài khoản xem, nhật ký liên quan.
-    Máy con nhận lệnh xóa dữ liệu cục bộ (nếu đang online), rồi bị ngắt quản lý (401 -> tự gỡ)."""
     cid, name = child.id, child.name
     dev_ids = list(db.scalars(select(Device.id).where(Device.child_id == cid)))
-    for did in dev_ids:   # báo máy con dọn dữ liệu cục bộ rồi ngắt kết nối; máy offline sẽ nhận 401 và tự gỡ
+    for did in dev_ids:
         app.state.manager.kick(did, [{"action": "WIPE_LOCAL", "minutes": 0}])
     if dev_ids:
         db.execute(delete(Command).where(Command.device_id.in_(dev_ids)))
@@ -298,7 +302,14 @@ def top_subjects(db: Session, child_id: int, etype: str, days: int = 7, limit: i
     rows = db.execute(select(Event.subject, func.sum(Event.duration_sec), func.count()).where(
         Event.child_id == child_id, Event.type == etype, Event.ts >= since).group_by(Event.subject)
         .order_by(func.sum(Event.duration_sec).desc(), func.count().desc()).limit(limit)).all()
-    return [{"subject": s, "seconds": int(d or 0), "count": c} for s, d, c in rows]
+    merged: dict[str, dict] = {}
+    for raw_s, d, c in rows:
+        disp = _display_subject(raw_s, etype)
+        if disp not in merged:
+            merged[disp] = {"subject": disp, "raw_subject": raw_s, "seconds": 0, "count": 0}
+        merged[disp]["seconds"] += int(d or 0)
+        merged[disp]["count"] += int(c or 0)
+    return sorted(merged.values(), key=lambda x: (-x["seconds"], -x["count"]))[:limit]
 
 
 def blocked_summary(db: Session, child_id: int, days: int = 7) -> dict:
@@ -311,9 +322,16 @@ def blocked_summary(db: Session, child_id: int, days: int = 7) -> dict:
 
 
 def top_subjects_blocked(db: Session, child_id: int, since: int, limit: int = 5):
-    rows = db.execute(select(Event.subject, func.count()).where(Event.child_id == child_id, Event.type.in_(("blocked_app", "blocked_domain")),
-                      Event.ts >= since).group_by(Event.subject).order_by(func.count().desc()).limit(limit)).all()
-    return [{"subject": s, "count": c} for s, c in rows]
+    rows = db.execute(select(Event.subject, Event.type, func.count()).where(
+        Event.child_id == child_id, Event.type.in_(("blocked_app", "blocked_domain")),
+        Event.ts >= since).group_by(Event.subject, Event.type).order_by(func.count().desc()).limit(limit * 2)).all()
+    merged: dict[str, dict] = {}
+    for raw_s, etype, c in rows:
+        disp = _display_subject(raw_s, etype)
+        if disp not in merged:
+            merged[disp] = {"subject": disp, "raw_subject": raw_s, "count": 0}
+        merged[disp]["count"] += int(c or 0)
+    return sorted(merged.values(), key=lambda x: -x["count"])[:limit]
 
 
 def recent_events(db: Session, child_id: int, limit: int = 20) -> list[Event]:
@@ -322,7 +340,6 @@ def recent_events(db: Session, child_id: int, limit: int = 20) -> list[Event]:
 
 
 def garden_today(db: Session, child_id: int, tz_min: int = 420) -> dict:
-    """Số liệu cho Khu vườn số: tổng giờ hôm nay và giờ theo nhóm (lấy từ bộ đếm nhóm của Agent, chính xác hơn đoán từ tên ứng dụng)."""
     day = local_today(tz_min).date().isoformat()
     total, groups = 0, {}
     for du in db.scalars(select(DailyUsage).where(DailyUsage.child_id == child_id, DailyUsage.day == day)):
