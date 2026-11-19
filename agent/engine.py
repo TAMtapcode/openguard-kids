@@ -168,6 +168,10 @@ class Engine:
             self._enforce(day, dt_local)
             if self.enrolled and not self.suspended:
                 self._scan_processes()
+                if self.cfg.block_taskmgr and self.applies and self._rate_ok("taskmgr_pol", 15):
+                    self.platform.set_taskmgr_policy(True, self.platform.active_user())
+                elif (not self.applies or not self.cfg.block_taskmgr) and self._rate_ok("taskmgr_pol", 15):
+                    self.platform.set_taskmgr_policy(False)
             self._housekeeping(mono, day)
 
     def _check_clock(self):
@@ -638,6 +642,7 @@ class Engine:
         try:
             self.platform.restore_dns(self._dns_state)
             self.platform.set_browser_doh_policy(False)
+            self.platform.set_taskmgr_policy(False)
             self.platform.flush_dns()
         except Exception:
             log.exception("restore system settings failed")

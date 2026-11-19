@@ -36,6 +36,7 @@ class AgentConfig:
     require_tray: bool = True         # NT1: không có biểu tượng khay -> agent tự dừng chặn
     ui_grace_sec: float = 90.0
     enable_dns: bool = True
+    block_taskmgr: bool = True        # Chặn mở Task Manager trên tài khoản con (bỏ qua nếu là Admin hoặc --dev)
     monitored_users: list = field(default_factory=list)  # rỗng = mọi tài khoản Windows trên máy; ngược lại chỉ các tài khoản này
 
     @property

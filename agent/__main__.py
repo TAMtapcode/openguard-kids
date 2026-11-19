@@ -86,7 +86,7 @@ def main(argv=None):
             print("Open Guardian Kids Agent đang chạy rồi, không mở thêm bản trùng lặp.")
             return 0
         if a.dev:
-            cfg.manage_system_dns, cfg.dns_port, cfg.require_tray, cfg.allow_insecure = False, 5353, False, True
+            cfg.manage_system_dns, cfg.dns_port, cfg.require_tray, cfg.allow_insecure, cfg.block_taskmgr = False, 5353, False, True, False
         setup_logging(cfg, console=True)
         eng = build_engine(cfg)
         eng.start()

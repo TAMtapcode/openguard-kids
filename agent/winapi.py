@@ -28,6 +28,7 @@ class Platform:
     def set_dns_loopback(self, state_file: Path) -> bool: return False
     def restore_dns(self, state_file: Path) -> None: pass
     def set_browser_doh_policy(self, block: bool) -> None: pass
+    def set_taskmgr_policy(self, block: bool, username: str = "") -> None: pass
     def launch_tray(self) -> bool: return False
     def acquire_single_instance(self, name: str): return object()
     def is_window_on_current_desktop(self, hwnd: int) -> bool: return True
@@ -313,6 +314,46 @@ class WindowsPlatform(Platform):
                         winreg.DeleteValue(k, name)
             except OSError:
                 pass
+
+    def set_taskmgr_policy(self, block: bool, username: str = "") -> None:
+        """Khóa mở Task Manager (DisableTaskMgr=1) riêng cho tài khoản người dùng thường (không khóa tài khoản Admin)."""
+        import winreg
+        subpath = r"Software\Microsoft\Windows\CurrentVersion\Policies\System"
+        if not block:
+            # Gỡ bỏ DisableTaskMgr ở mọi SID trong HKEY_USERS khi dừng/gỡ cài đặt
+            try:
+                i = 0
+                while True:
+                    sid = winreg.EnumKey(winreg.HKEY_USERS, i)
+                    i += 1
+                    try:
+                        with winreg.OpenKey(winreg.HKEY_USERS, f"{sid}\{subpath}", 0, winreg.KEY_SET_VALUE) as k:
+                            winreg.DeleteValue(k, "DisableTaskMgr")
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+            return
+
+        user = (username or self.active_user()).split("\")[-1].strip()
+        if not user:
+            return
+        # Lấy SID và chỉ áp dụng nếu tài khoản KHÔNG thuộc nhóm Administrators (để Admin vẫn mở Task Manager test được)
+        ps = (
+            f"$u = '{user.replace(chr(39), chr(39)*2)}'; "
+            "$acc = New-Object System.Security.Principal.NTAccount($u); "
+            "$sid = $acc.Translate([System.Security.Principal.SecurityIdentifier]).Value; "
+            "$isAdm = (Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction SilentlyContinue | Where-Object { $_.SID.Value -eq $sid }) -ne $null; "
+            "if (-not $isAdm) { Write-Output $sid }"
+        )
+        sid = self._ps(ps).strip()
+        if not sid or not sid.startswith("S-1-5-21-"):
+            return
+        try:
+            with winreg.CreateKeyEx(winreg.HKEY_USERS, f"{sid}\{subpath}", 0, winreg.KEY_SET_VALUE) as k:
+                winreg.SetValueEx(k, "DisableTaskMgr", 0, winreg.REG_DWORD, 1)
+        except OSError:
+            pass
 
     def launch_tray(self) -> bool:
         try:
