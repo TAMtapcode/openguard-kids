@@ -49,7 +49,7 @@ def event_vi(e) -> str:
         return f"Nhắc bé sắp hết giờ (còn khoảng {sub.replace('min', '')} phút)"
     if e.type == "locked":
         return "Máy tạm nghỉ: " + {
-            "manual": "bố mẹ bấm tạm khóa",
+            "manual": "phụ huynh bấm khóa",
             "quota": "hết giờ dùng trong ngày",
             "schedule": "ngoài khung giờ cho phép",
         }.get(sub, "tới giờ nghỉ")
@@ -57,7 +57,7 @@ def event_vi(e) -> str:
         mins = f" ({e.duration_sec // 60} phút)" if e.duration_sec else ""
         return {
             "parent_add_time": "Bố mẹ cho thêm giờ",
-            "learn_to_play": "Bé đổi giờ chăm học lấy giờ chơi",
+            "learn_to_play": "đổi giờ học lấy giờ chơi",
             "parent_unlock": "Bố mẹ mở khóa cho bé dùng thêm",
         }.get(sub, "Bố mẹ cho thêm giờ") + mins
     return "Bé gửi lời nhắn cho bố mẹ" + (f" ({sub})" if sub and sub not in ("add-time", "false-block") else "")
