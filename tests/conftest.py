@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from server.config import load_settings  # noqa: E402
 from server.main import create_app  # noqa: E402
 
-PW = "Mat-khau-du-manh-1"
+PW = "Mat-khau-du-manh-123"
 
 
 @pytest.fixture
