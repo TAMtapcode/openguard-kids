@@ -89,37 +89,24 @@ function Devices({ o, reload }) {
 
 
 function DigitalGarden({ report }) {
-  if (!report) return null;
-  const eduTime = report.apps?.filter(a => a.cat === 'education').reduce((s, a) => s + a.sec, 0) || 0;
-  const gameTime = report.apps?.filter(a => ['game', 'entertainment'].includes(a.cat)).reduce((s, a) => s + a.sec, 0) || 0;
-  const totalTime = report.usage?.[0]?.seconds || 0;
-
-  let icon = "🌱";
-  let message = "Cây đang lớn lên cùng bé.";
-  let colorClass = "bg-green-50 border-green-200 text-green-800";
-
+  const g = report?.garden;
+  if (!g) return null;
+  const eduTime = g.education_sec || 0, gameTime = g.play_sec || 0, totalTime = g.total_sec || 0;
+  let icon = "🌱", message = "Cây đang lớn lên cùng bé.", tone = "ok";
   if (totalTime > 3 * 3600) {
-    icon = "🥀";
-    message = "Cây đang mệt úa. Bé dùng máy hơi lâu, nhắc bé nghỉ mắt nhé!";
-    colorClass = "bg-yellow-50 border-yellow-200 text-yellow-800";
+    icon = "🥀"; message = "Cây đang mệt úa. Bé dùng máy hơi lâu, nhắc bé nghỉ mắt nhé!"; tone = "tired";
   } else if (eduTime > gameTime && eduTime > 300) {
-    icon = "🌳";
-    message = "Cây rất tươi tốt vì hôm nay bé học tập chăm chỉ!";
-    colorClass = "bg-emerald-50 border-emerald-200 text-emerald-900";
+    icon = "🌳"; message = "Cây rất tươi tốt vì hôm nay bé học tập chăm chỉ!"; tone = "lush";
   }
-
   return (
-    <div className={`p-6 rounded-xl border flex items-center gap-6 mb-6 ${colorClass}`}>
-      <div className="text-6xl drop-shadow-sm">{icon}</div>
+    <section className={"panel garden " + tone}>
+      <div className="garden-icon" aria-hidden="true">{icon}</div>
       <div>
-        <h3 className="text-lg font-bold mb-1">Khu vườn số</h3>
-        <p className="text-sm font-medium">{message}</p>
-        <div className="text-sm mt-2 opacity-80 flex gap-4">
-          <span>📚 Học tập: {Math.round(eduTime / 60)} phút</span>
-          <span>🎮 Giải trí: {Math.round(gameTime / 60)} phút</span>
-        </div>
+        <h3>Khu vườn số <small className="muted">hôm nay</small></h3>
+        <p>{message}</p>
+        <p className="muted">📚 Học tập: {Math.round(eduTime / 60)} phút · 🎮 Giải trí & chơi: {Math.round(gameTime / 60)} phút</p>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -141,7 +128,12 @@ export default function Child() {
   const wipe = async () => {
     const typed = window.prompt(`Việc này xóa toàn bộ dữ liệu hoạt động của ${o.child.name} trên máy chủ và máy con, không thể khôi phục.\nGõ tên con để xác nhận:`);
     if (!typed || typed.trim() !== o.child.name) return;
-    try { await api("DELETE", `/api/parent/children/${o.child.id}/data`); toast("Đã xóa dữ liệu."); load(); } catch (e) { toast(e.message, true); }
+    try { await api("DELETE", `/api/parent/children/${o.child.id}/data`); toast("Đã xóa dữ liệu hoạt động. Hồ sơ của con vẫn còn."); load(); } catch (e) { toast(e.message, true); }
+  };
+  const removeChild = async () => {
+    const typed = window.prompt(`Việc này xóa HẲN hồ sơ của ${o.child.name}: luật, báo cáo, nhật ký, tài khoản xem và gỡ máy của con khỏi quản lý. Không thể khôi phục.\nGõ tên con để xác nhận:`);
+    if (!typed || typed.trim() !== o.child.name) return;
+    try { await api("DELETE", `/api/parent/children/${o.child.id}`); toast(`Đã xóa hồ sơ của ${o.child.name}.`); nav("/", { replace: true }); } catch (e) { toast(e.message, true); }
   };
   return (
     <>
@@ -154,7 +146,12 @@ export default function Child() {
           ))}
         </div>
       </header>
-      {tab === "live" && (live ? <ChildCard c={live} onDone={loadStatus} /> : <p className="muted">Đang tải…</p>)}
+      {tab === "live" && (
+        <>
+          <DigitalGarden report={o.report} />
+          {live ? <ChildCard c={live} onDone={loadStatus} /> : <p className="muted">Đang tải…</p>}
+        </>
+      )}
       {tab === "report" && (
         <section className="panel"><h2>7 ngày qua</h2><UsageChart points={o.report.usage} />
           <div className="grid2">
@@ -175,7 +172,11 @@ export default function Child() {
       {tab === "data" && (
         <section className="panel danger-zone"><h2>Dữ liệu của con</h2>
           <p>Dữ liệu hoạt động tự động xóa sau 90 ngày. Bạn có thể xóa ngay toàn bộ dữ liệu trên máy chủ và trên bộ nhớ đệm của máy con.</p>
-          <button className="btn danger" type="button" onClick={wipe}>Xóa toàn bộ dữ liệu của con tôi</button></section>
+          <button className="btn danger" type="button" onClick={wipe}>Xóa toàn bộ dữ liệu của con tôi</button>
+          <p className="muted">Nút trên chỉ xóa dữ liệu hoạt động; hồ sơ của con vẫn hiện ở trang chủ.</p>
+          <h3>Xóa hồ sơ của con</h3>
+          <p>Xóa hẳn hồ sơ khỏi trang chủ, kèm toàn bộ dữ liệu, luật, thiết bị đã ghép đôi và tài khoản xem của con.</p>
+          <button className="btn danger" type="button" onClick={removeChild}>Xóa hẳn hồ sơ của {o.child.name}</button></section>
       )}
     </>
   );

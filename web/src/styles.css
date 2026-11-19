@@ -61,3 +61,13 @@ textarea{width:100%;font-family:ui-monospace,Consolas,monospace;font-size:.85rem
 .lockbox p{margin:.2rem 0 .6rem}.center{display:grid;place-items:center;min-height:50vh}
 .server-chip{font-size:.8rem;color:var(--ink2);background:var(--sky);padding:3px 10px;border-radius:999px;border:0;cursor:pointer}
 .ok{background:#e1f3e8;color:#1f5e3d;padding:10px 12px;border-radius:8px;margin:0}
+
+/* Khu vườn số */
+.garden{display:flex;align-items:center;gap:1.25rem}
+.garden h3{margin:0 0 .25rem}
+.garden p{margin:.2rem 0}
+.garden-icon{font-size:3.5rem;line-height:1}
+.garden.lush{background:#ecfdf5;border-color:#a7f3d0}
+.garden.tired{background:#fefce8;border-color:#fde68a}
+.garden.ok{background:#f0fdf4;border-color:#bbf7d0}
+@media (prefers-color-scheme:dark){.garden.lush,.garden.tired,.garden.ok{background:rgba(34,197,94,.08);border-color:rgba(34,197,94,.3)}}

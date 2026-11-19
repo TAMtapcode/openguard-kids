@@ -87,6 +87,8 @@ def enroll_code(cid: int, request: Request, consent: bool = False, user: User = 
 def _cmd_minutes(body: CommandIn) -> int:
     if body.action == "LOCK_NOW":
         return body.minutes if "minutes" in body.model_fields_set else 60
+    if body.action == "UNLOCK":   # mở khóa: nếu máy đang khóa vì hết giờ/ngoài khung giờ, cho dùng tạm chừng này phút
+        return body.minutes if "minutes" in body.model_fields_set else 15
     return body.minutes if body.action == "ADD_TIME" else 0
 
 
@@ -103,7 +105,7 @@ def command(cid: int, body: CommandIn, request: Request, user: User = parent_onl
     sent = 0
     for d in devs:
         cmd = services.create_command(request.app, db, d, body.action, _cmd_minutes(body), user.email)
-        sent += cmd.status == "sent"
+        sent += bool(getattr(cmd, "delivered", False))
     services.audit(db, user.email, client_ip(request), child.id, f"command_{body.action}", "", "", str(body.minutes))
     db.commit()
     return {"devices": len(devs), "delivered_now": sent}
@@ -179,12 +181,21 @@ def delete_data(cid: int, request: Request, user: User = parent_only, db: Sessio
     return {"ok": True}
 
 
+@router.delete("/children/{cid}", dependencies=[Depends(csrf_check)])
+def delete_child(cid: int, request: Request, user: User = parent_only, db: Session = Depends(get_db)):
+    """Xóa hẳn hồ sơ của con (khác với 'xóa dữ liệu' chỉ dọn hoạt động nhưng giữ hồ sơ)."""
+    child = owned_child(db, user, cid)
+    services.delete_child(request.app, db, child, user.email, client_ip(request))
+    return {"ok": True}
+
+
 @router.post("/devices/{did}/revoke", dependencies=[Depends(csrf_check)])
 def revoke(did: str, request: Request, user: User = parent_only, db: Session = Depends(get_db)):
     dev = owned_device(db, user, did)
     dev.status, dev.refresh_hash = "revoked", ""
     services.audit(db, user.email, client_ip(request), dev.child_id, "device_revoked", "device", dev.id, "revoked")
     db.commit()
+    request.app.state.manager.kick(dev.id)   # ngắt WS ngay, không chờ máy con tự phát hiện
     return {"ok": True}
 
 

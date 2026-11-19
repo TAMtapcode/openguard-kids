@@ -38,6 +38,9 @@ class Engine:
         from .winapi import get_platform
         self.cfg, self.mono, self.server, self.policy_key = cfg, mono, server, policy_key
         self.store = store or AgentStore(cfg.db_path)
+        if cfg.device_id and self.store.kv_get("cmd_device_id") != cfg.device_id:
+            self.store.reset_commands()   # ghép đôi mới: id lệnh của máy chủ mới bắt đầu lại, không được so với id cũ
+            self.store.kv_set("cmd_device_id", cfg.device_id)
         self.platform = platform or get_platform()
         self.clock = clock or TrustedClock(self.store, mono=mono)
         self.lock = threading.RLock()
@@ -257,6 +260,12 @@ class Engine:
             return
         manual = float(self.store.kv_get("manual_lock_until", "0") or 0) > self.clock.now()   # lệnh khóa tay luôn tự hết hạn
         prev = self.decision
+        ov_left = float(self.store.kv_get("unlock_override_until", "0") or 0) - self.clock.now()
+        if not manual and ov_left > 0:
+            # Bố mẹ bấm "Mở khóa" khi máy đang khóa vì hết giờ/ngoài khung giờ: cho dùng tạm, hết thì ân hạn rồi khóa lại.
+            self.enforcer.reset("ok")
+            self.decision = Decision(state="ok", remaining_sec=ov_left, limit_sec=self.decision.limit_sec)
+            return
         dec = self.enforcer.evaluate(self.policy, dt_local, self.acc.get(day, "total"), self.acc.get(day, "bonus"), manual)
         self.decision = dec
         for _ in dec.warnings:
@@ -345,17 +354,34 @@ class Engine:
 
     # ================================================================= lệnh khẩn
     def handle_command(self, cmd: dict) -> bool:
+        """Áp dụng lệnh khẩn. Trả True nếu lệnh đã xử lý xong (hoặc đã xử lý trước đó) -> mới được ack."""
         with self.lock:
             cid, act = cmd.get("id"), cmd.get("action")
             if cid is not None and self.store.command_applied(cid):
                 return True
             _, day = self._parts()
+            if act in ("LOCK_NOW", "UNLOCK") and cid is not None:
+                # Lệnh trạng thái: lệnh có id nhỏ hơn lệnh Khóa/Mở khóa đã áp dụng là lệnh CŨ đến muộn
+                # (WS và heartbeat là hai đường độc lập) -> bỏ qua, nếu không máy sẽ lại bị khóa/mở sai.
+                last = int(self.store.kv_get("state_cmd_seq", "0") or 0)
+                if int(cid) < last:
+                    self.store.mark_command(cid)
+                    return True
+                self.store.kv_set("state_cmd_seq", int(cid))
             if act == "LOCK_NOW":
                 mins = max(1, min(int(cmd.get("minutes") or MANUAL_LOCK_MIN), 240))
                 self.store.kv_set("manual_lock_until", f"{self.clock.now() + mins * 60:.0f}")
+                self.store.kv_set("unlock_override_until", "0")
                 self.event("locked", "manual")
             elif act == "UNLOCK":
                 self.store.kv_set("manual_lock_until", "0")
+                self.store.kv_set("unlock_override_until", "0")
+                self.enforce_now()   # gỡ khóa tay xong mà vẫn bị khóa vì hết giờ/ngoài khung giờ thì "Mở khóa" phải có tác dụng thật
+                if self.decision.state in ("locked", "grace") and self.decision.reason in ("quota", "schedule"):
+                    mins = max(1, min(int(cmd.get("minutes") or 15), 240))
+                    self.store.kv_set("unlock_override_until", f"{self.clock.now() + mins * 60:.0f}")
+                    self.event("override_granted", "parent_unlock", mins * 60)
+                    self.notify("bonus", "Bố mẹ đã mở khóa", f"Em được dùng máy thêm {mins} phút.")
             elif act == "ADD_TIME":
                 m = max(0, min(int(cmd.get("minutes", 15)), 240))
                 self.acc.add(day, "bonus", m * 60)
@@ -367,12 +393,13 @@ class Engine:
                 self.acc.reload()
                 self.notify("wipe", "Dữ liệu đã được xóa", "Bố mẹ đã xóa dữ liệu hoạt động của em trên máy này.")
             elif act == "POLICY_UPDATED":
-                self._wake.set()
+                pass
             else:
                 return False
             if cid is not None:
                 self.store.mark_command(cid)
             self.enforce_now()
+            self._wake.set()   # báo trạng thái mới lên máy chủ NGAY (bảng điều khiển không phải chờ nhịp 60 giây)
             return True
 
     def flush_all(self):
@@ -470,6 +497,9 @@ class Engine:
                 return
             self.enrolled, self.policy = False, None
             self.store.kv_set("policy_env", "")
+            self.store.kv_set("manual_lock_until", "0")
+            self.store.kv_set("unlock_override_until", "0")
+            self.store.reset_commands()
             self.notify("unenrolled", "Máy không còn được quản lý", "Bố mẹ đã gỡ thiết bị này. Open Guardian Kids ngừng áp dụng luật.")
         self._restore_system()
 
@@ -585,7 +615,7 @@ class Engine:
         if self.server:
             self._spawn(self._sync_loop, "ogk-sync")
             from .sync_client import CommandChannel
-            self.ws = CommandChannel(self.server, self.handle_command)
+            self.ws = CommandChannel(self.server, self.handle_command, on_state=lambda up: self._wake.set() if up else None)
             self.ws.start()
 
     def _spawn(self, fn, name):

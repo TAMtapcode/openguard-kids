@@ -6,7 +6,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from common.schema import CATEGORIES, COMMAND_ACTIONS, DEFAULT_APP_GROUPS
@@ -210,15 +210,26 @@ def is_online(app, dev: Device) -> bool:
     return app.state.manager.is_connected(dev.id) or (now() - dev.last_seen) <= app.state.settings.online_window_sec
 
 
+STATE_CMDS = ("LOCK_NOW", "UNLOCK")   # lệnh "trạng thái": lệnh mới luôn thay thế lệnh cũ chưa xong
+
+
 def create_command(app, db: Session, device: Device, action: str, minutes: int, actor: str) -> Command:
     assert action in COMMAND_ACTIONS
+    if action in STATE_CMDS:
+        # Khóa/Mở khóa là lệnh trạng thái: lệnh cũ chưa được ack không còn ý nghĩa và KHÔNG được phát lại
+        # (nếu phát lại sau lệnh mới sẽ làm đảo kết quả, ví dụ máy lại bị khóa sau khi đã mở).
+        db.execute(update(Command).where(Command.device_id == device.id, Command.action.in_(STATE_CMDS),
+                                         Command.status != "acked").values(status="acked", acked_at=now()))
     cmd = Command(device_id=device.id, action=action, minutes=minutes, created_by=actor, created_at=now())
     db.add(cmd)
     db.flush()
+    frame = command_frame(cmd)
     db.commit()  # phải commit trước khi đẩy: Agent có thể ack ngay
-    if app.state.manager.push(device.id, command_frame(cmd)):
-        cmd.status = "sent"
-        db.commit()
+    cmd.delivered = False   # thuộc tính tạm: đã đẩy tới Agent qua WS (kể cả khi Agent ack nhanh hơn ta kịp ghi "sent")
+    if app.state.manager.push(device.id, frame):
+        cmd.delivered = True
+        db.execute(update(Command).where(Command.id == frame["id"], Command.status == "pending").values(status="sent"))
+        db.commit()   # chỉ nâng pending -> sent, không bao giờ ghi đè "acked" mà Agent vừa gửi
     return cmd
 
 
@@ -240,6 +251,32 @@ def wipe_child_data(app, db: Session, child: Child, actor: str, ip: str):
     db.commit()
     for dev in active_devices(db, child.id):
         create_command(app, db, dev, "WIPE_LOCAL", 0, actor)
+
+
+def delete_child(app, db: Session, child: Child, actor: str, ip: str):
+    """Xóa HẲN hồ sơ của con: thiết bị, luật, sự kiện, báo cáo, yêu cầu, tài khoản xem, nhật ký liên quan.
+    Máy con nhận lệnh xóa dữ liệu cục bộ (nếu đang online), rồi bị ngắt quản lý (401 -> tự gỡ)."""
+    cid, name = child.id, child.name
+    dev_ids = list(db.scalars(select(Device.id).where(Device.child_id == cid)))
+    for did in dev_ids:   # báo máy con dọn dữ liệu cục bộ rồi ngắt kết nối; máy offline sẽ nhận 401 và tự gỡ
+        app.state.manager.kick(did, [{"action": "WIPE_LOCAL", "minutes": 0}])
+    if dev_ids:
+        db.execute(delete(Command).where(Command.device_id.in_(dev_ids)))
+    db.execute(delete(Event).where(Event.child_id == cid))
+    db.execute(delete(DailyUsage).where(DailyUsage.child_id == cid))
+    db.execute(delete(ChildRequest).where(ChildRequest.child_id == cid))
+    db.execute(delete(EnrollCode).where(EnrollCode.child_id == cid))
+    db.execute(delete(AuditLog).where(AuditLog.child_id == cid))
+    db.execute(delete(PolicyRow).where(PolicyRow.child_id == cid))
+    viewer_ids = list(db.scalars(select(User.id).where(User.child_id == cid, User.role == "child_view")))
+    if viewer_ids:
+        db.execute(delete(WebSession).where(WebSession.user_id.in_(viewer_ids)))
+        db.execute(delete(User).where(User.id.in_(viewer_ids)))
+    if dev_ids:
+        db.execute(delete(Device).where(Device.id.in_(dev_ids)))
+    db.execute(delete(Child).where(Child.id == cid))
+    audit(db, actor, ip, None, "child_deleted", "child", name, "đã xóa hồ sơ")
+    db.commit()
 
 
 # ---------------------------------------------------------------- báo cáo
@@ -284,9 +321,25 @@ def recent_events(db: Session, child_id: int, limit: int = 20) -> list[Event]:
     return list(db.scalars(select(Event).where(Event.child_id == child_id, Event.type.in_(types)).order_by(Event.ts.desc(), Event.id.desc()).limit(limit)))
 
 
+def garden_today(db: Session, child_id: int, tz_min: int = 420) -> dict:
+    """Số liệu cho Khu vườn số: tổng giờ hôm nay và giờ theo nhóm (lấy từ bộ đếm nhóm của Agent, chính xác hơn đoán từ tên ứng dụng)."""
+    day = local_today(tz_min).date().isoformat()
+    total, groups = 0, {}
+    for du in db.scalars(select(DailyUsage).where(DailyUsage.child_id == child_id, DailyUsage.day == day)):
+        total += int(du.seconds or 0)
+        try:
+            for g, v in json.loads(du.groups or "{}").items():
+                groups[g] = groups.get(g, 0) + int(v)
+        except (ValueError, TypeError, AttributeError):
+            pass
+    return {"total_sec": total, "education_sec": groups.get("education", 0),
+            "play_sec": groups.get("game", 0) + groups.get("entertainment", 0) + groups.get("social", 0)}
+
+
 def child_report(db: Session, child_id: int, days: int = 7) -> dict:
     return {"usage": usage_by_day(db, child_id, days), "apps": top_subjects(db, child_id, "app_stop", days),
-            "domains": top_subjects(db, child_id, "domain_query", days), "blocked": blocked_summary(db, child_id, days)}
+            "domains": top_subjects(db, child_id, "domain_query", days), "blocked": blocked_summary(db, child_id, days),
+            "garden": garden_today(db, child_id)}
 
 
 # ---------------------------------------------------------------- lưu trữ 90 ngày

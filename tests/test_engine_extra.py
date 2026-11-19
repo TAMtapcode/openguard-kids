@@ -269,3 +269,27 @@ def test_time_behind_the_lock_screen_does_not_consume_quota(tmp_path):
     before = eng.acc.get(eng._parts()[1], "total")
     ticks(eng, fc, 30)
     assert eng.decision.state == "locked" and eng.acc.get(eng._parts()[1], "total") == before
+
+
+def test_stale_lock_arriving_after_unlock_is_ignored(tmp_path):
+    """Lỗi gốc: Khóa(id 5) rồi Mở khóa(id 6) bấm nhanh; lệnh Khóa đến muộn (qua heartbeat) không được khóa lại máy."""
+    eng, plat, fc = local_engine(tmp_path)
+    assert eng.handle_command({"id": 6, "action": "UNLOCK"})
+    assert eng.handle_command({"id": 5, "action": "LOCK_NOW", "minutes": 60})      # lệnh cũ đến muộn
+    assert eng.decision.state == "ok" and float(eng.store.kv_get("manual_lock_until", "0")) == 0
+    assert eng.handle_command({"id": 7, "action": "LOCK_NOW", "minutes": 60})      # lệnh mới hơn vẫn có tác dụng
+    assert eng.decision.state == "locked"
+    assert eng.handle_command({"id": 6, "action": "UNLOCK"})                       # trùng id: bỏ qua
+    assert eng.decision.state == "locked"
+
+
+def test_unlock_overrides_quota_lock_and_unknown_command_is_not_acked(tmp_path):
+    eng, plat, fc = local_engine(tmp_path)
+    eng.acc.add(eng._parts()[1], "total", 10 * 3600)                               # đã quá hạn mức
+    eng.enforce_now()
+    assert eng.decision.state == "locked" and eng.decision.reason in ("quota", "schedule")
+    assert eng.handle_command({"id": 3, "action": "UNLOCK", "minutes": 10})
+    assert eng.decision.state == "ok"                                               # "Mở khóa" có tác dụng thật
+    assert eng.handle_command({"id": 4, "action": "LOCK_NOW", "minutes": 5})
+    assert eng.decision.state == "locked" and eng.decision.reason == "manual"
+    assert eng.handle_command({"id": 99, "action": "KHONG_CO"}) is False           # lệnh lạ: không ack

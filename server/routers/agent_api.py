@@ -1,6 +1,7 @@
 """API cho Agent trên máy trẻ: ghép đôi, token, heartbeat, chính sách, sự kiện, yêu cầu, WebSocket."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -217,17 +218,19 @@ async def agent_ws(ws: WebSocket, device_id: str):
             db.commit()
             return frames
 
-    frames = await run_in_threadpool(_check_and_pending)
-    if frames is None:
+    if await run_in_threadpool(_check_and_pending) is None:
         await ws.close(code=4401)
         return
     await ws.accept()
     await app.state.manager.connect(device_id, ws)
     try:
-        for f in frames:  # đẩy ngay các lệnh còn tồn đọng khi vừa kết nối
-            await ws.send_json(f)
+        # Lấy lệnh tồn đọng SAU khi đã đăng ký kết nối: lệnh tạo trong khoảng giữa không còn bị bỏ sót.
+        # Gửi qua manager.send để cùng khóa thứ tự với lệnh mới; Agent khử trùng theo id.
+        for f in await run_in_threadpool(_check_and_pending) or []:
+            await app.state.manager.send(device_id, f)
         while True:
-            msg = await ws.receive_json()
+            # Agent ping mỗi ~20s; im lặng > 75s nghĩa là kết nối chết -> đóng để Agent nối lại và lệnh không rơi vào khoảng trống.
+            msg = await asyncio.wait_for(ws.receive_json(), timeout=75)
             if "ack" in msg:
                 def _ack(cid=int(msg["ack"])):
                     with app.state.SessionLocal() as db:
@@ -237,8 +240,8 @@ async def agent_ws(ws: WebSocket, device_id: str):
                             db.commit()
                 await run_in_threadpool(_ack)
             elif msg.get("ping"):
-                await ws.send_json({"pong": now()})
-    except (WebSocketDisconnect, RuntimeError, ValueError):
+                await app.state.manager.send(device_id, {"pong": now()})
+    except (WebSocketDisconnect, RuntimeError, ValueError, asyncio.TimeoutError):
         pass
     finally:
         app.state.manager.disconnect(device_id, ws)

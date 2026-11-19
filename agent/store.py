@@ -90,6 +90,12 @@ class AgentStore:
             self.db.execute("INSERT OR IGNORE INTO applied_cmds VALUES(?,?)", (cid, time.time()))
             self.db.execute("DELETE FROM applied_cmds WHERE ts < ?", (time.time() - 7 * 86400,))
 
+    def reset_commands(self):
+        """Ghép đôi mới / gỡ thiết bị: quên id lệnh cũ để lệnh từ máy chủ mới (id bắt đầu lại) không bị coi là trùng."""
+        with self._lock:
+            self.db.execute("DELETE FROM applied_cmds")
+            self.db.execute("DELETE FROM kv WHERE k='state_cmd_seq'")
+
     def wipe_activity(self, keep_day: str):
         """'Xóa dữ liệu của con': xóa hàng đợi + thống kê; GIỮ bộ đếm tổng/thưởng của hôm nay để hạn mức không bị đặt lại."""
         with self._lock:

@@ -89,6 +89,9 @@ class Enforcer:
         self._last_state: str | None = None
         self._armed: dict | None = None
 
+    def reset(self, state: str = "ok"):
+        self._grace_start, self._last_state, self._armed = None, state, None
+
     def evaluate(self, policy: Policy, dt: datetime, used_sec: float, bonus_sec: float, manual_lock: bool) -> Decision:
         limit = policy.limit_sec(dt.weekday()) + bonus_sec
         quota_left = limit - used_sec

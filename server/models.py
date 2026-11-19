@@ -107,6 +107,7 @@ class PolicyRow(Base):
 
 class Command(Base):
     __tablename__ = "commands"
+    __table_args__ = {"sqlite_autoincrement": True}   # id lệnh không bao giờ tái sử dụng (Agent khử trùng theo id)
     id: Mapped[int] = mapped_column(primary_key=True)
     device_id: Mapped[str] = mapped_column(String(36), index=True)
     action: Mapped[str] = mapped_column(String(20))

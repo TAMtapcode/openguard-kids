@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api.js";
 import { dur, usePoll, useToast } from "../ui.jsx";
@@ -7,21 +7,30 @@ function LockControl({ child, dev, onDone }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [minutes, setMinutes] = useState(60);
+  const [busy, setBusy] = useState(false);
+  // Trạng thái trên bảng điều khiển chỉ cập nhật khi máy con báo về; sau khi gửi lệnh ta tải lại nhiều lần để thấy kết quả sớm.
+  const refreshSoon = () => [800, 2500, 5000].forEach(ms => setTimeout(onDone, ms));
   const send = async (action, extra = {}) => {
+    if (busy) return;
+    setBusy(true);
     try {
-      await api("POST", `/api/parent/children/${child.id}/command`, { action, device_id: dev.id, ...extra });
-      toast(action === "LOCK_NOW" ? `Đã khóa, tự mở sau ${extra.minutes} phút.` : action === "ADD_TIME" ? "Đã cộng 15 phút." : "Đã mở khóa.");
+      const r = await api("POST", `/api/parent/children/${child.id}/command`, { action, device_id: dev.id, ...extra });
+      const base = action === "LOCK_NOW" ? `Đã khóa, tự mở sau ${extra.minutes} phút.` : action === "ADD_TIME" ? "Đã cộng 15 phút." : "Đã mở khóa.";
+      toast(r.delivered_now ? base : `${base} Máy đang ngoại tuyến, lệnh sẽ áp dụng ngay khi máy kết nối lại.`);
       setOpen(false);
       onDone();
+      refreshSoon();
     } catch (e) { toast(e.message, true); }
+    finally { setBusy(false); }
   };
+  const locked = dev.state === "locked";
   return (
     <>
       <div className="actions">
-        {dev.state === "locked"
-          ? <button className="btn ghost" type="button" onClick={() => send("UNLOCK")}>Mở khóa</button>
-          : <button className="btn danger" type="button" onClick={() => setOpen(!open)}>Khóa máy…</button>}
-        <button className="btn primary" type="button" onClick={() => send("ADD_TIME", { minutes: 15 })}>Cộng 15 phút</button>
+        {/* Luôn hiện cả hai nút: trạng thái "đang khóa" có thể chưa kịp cập nhật, không để bố mẹ bị kẹt không bấm được Mở khóa */}
+        <button className={"btn " + (locked ? "primary" : "ghost")} type="button" disabled={busy} onClick={() => send("UNLOCK")}>Mở khóa</button>
+        <button className="btn danger" type="button" disabled={busy} onClick={() => setOpen(!open)}>Khóa máy…</button>
+        <button className="btn primary" type="button" disabled={busy} onClick={() => send("ADD_TIME", { minutes: 15 })}>Cộng 15 phút</button>
       </div>
       {open && (
         <div className="lockbox">
@@ -32,7 +41,7 @@ function LockControl({ child, dev, onDone }) {
               <select value={minutes} onChange={e => setMinutes(Number(e.target.value))}>
                 {[15, 30, 60, 120, 240].map(m => <option key={m} value={m}>{m < 60 ? `${m} phút` : `${m / 60} giờ`}</option>)}
               </select></label>
-            <button className="btn danger" type="button" onClick={() => send("LOCK_NOW", { minutes })}>Khóa ngay</button>
+            <button className="btn danger" type="button" disabled={busy} onClick={() => send("LOCK_NOW", { minutes })}>Khóa ngay</button>
             <button className="btn ghost" type="button" onClick={() => setOpen(false)}>Thôi</button>
           </div>
         </div>
@@ -76,8 +85,12 @@ export function ChildCard({ c, link, onDone }) {
 
 export function useStatus() {
   const [kids, setKids] = useState(null);
-  const load = useCallback(() => api("GET", "/api/parent/status").then(r => setKids(r.children)).catch(() => {}), []);
-  usePoll(load, 5000);
+  const seq = useRef(0);
+  const load = useCallback(() => {
+    const n = ++seq.current;   // chỉ nhận phản hồi mới nhất, phản hồi cũ đến muộn không được ghi đè trạng thái mới
+    return api("GET", "/api/parent/status").then(r => { if (n === seq.current) setKids(r.children); }).catch(() => {});
+  }, []);
+  usePoll(load, 3000);
   return [kids, load];
 }
 
@@ -93,7 +106,7 @@ export default function Dashboard() {
   return (
     <>
       <header className="page-head"><h1>Hôm nay con đang thế nào?</h1>
-        <p className="muted">Cập nhật mỗi 5 giây. Lệnh khóa và cộng giờ đến máy của con trong vài giây.</p></header>
+        <p className="muted">Cập nhật mỗi 3 giây. Lệnh khóa và cộng giờ đến máy của con trong vài giây.</p></header>
       <section className="children" aria-live="polite">
         {kids === null ? <p className="muted">Đang tải…</p> : kids.length ? kids.map(c => <ChildCard key={c.id} c={c} link onDone={load} />)
           : <p className="muted">Chưa có hồ sơ nào. Hãy thêm con ở bên dưới.</p>}

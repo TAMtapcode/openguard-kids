@@ -233,3 +233,32 @@ def test_child_page_shows_recent_security_events(parent, device_client):
 
 def test_privacy_page_is_public(client):
     assert client.get("/privacy").status_code == 200
+
+
+# ---------------------------------------------------------------- thứ tự lệnh & xóa hồ sơ
+def test_newer_lock_unlock_supersedes_older_pending_commands(app, parent, device_client):
+    cid = parent.add_child()
+    d = parent.enroll(cid, device_client)
+    parent.post(f"/api/parent/children/{cid}/command", json={"action": "LOCK_NOW"})
+    parent.post(f"/api/parent/children/{cid}/command", json={"action": "UNLOCK"})
+    hb = device_client.post("/api/v1/heartbeat", headers=bearer(d["access_token"]),
+                            json={"policy_version": 0, "day": "2026-01-01", "used_today_sec": 0}).json()
+    assert [c["action"] for c in hb["commands"]] == ["UNLOCK"]        # LOCK cũ không bị phát lại sau UNLOCK
+
+
+def test_delete_child_removes_profile_and_everything_linked(app, parent, device_client):
+    cid = parent.add_child()
+    other = parent.add_child()
+    d = parent.enroll(cid, device_client)
+    parent.post(f"/api/parent/children/{cid}/viewer", json={"username": "beyeu", "password": "Thu-nghiem8"})
+    parent.post(f"/api/parent/children/{cid}/command", json={"action": "LOCK_NOW"})
+    assert parent.delete(f"/api/parent/children/{cid}").json() == {"ok": True}
+    kids = [c["id"] for c in parent.c.get("/api/parent/status").json()["children"]]
+    assert cid not in kids and other in kids
+    assert parent.c.get(f"/api/parent/children/{cid}/policy").status_code == 404
+    assert device_client.post("/api/v1/heartbeat", headers=bearer(d["access_token"]),
+                              json={"policy_version": 0, "day": "2026-01-01", "used_today_sec": 0}).status_code == 401
+    with app.state.SessionLocal() as db:
+        assert db.scalar(select(User).where(User.email == "beyeu")) is None
+        assert db.scalar(select(Device).where(Device.child_id == cid)) is None
+        assert db.scalar(select(Command)) is None

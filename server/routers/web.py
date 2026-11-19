@@ -23,7 +23,7 @@ router = APIRouter()
 ACTION_VI = {"policy_change": "Đổi luật", "child_created": "Thêm hồ sơ con", "consent_and_enroll_code": "Đồng ý & tạo mã ghép đôi",
              "device_enrolled": "Ghép đôi thiết bị", "device_revoked": "Gỡ thiết bị", "request_decided": "Phản hồi yêu cầu của con",
              "wipe_child_data": "Xóa toàn bộ dữ liệu hoạt động", "viewer_created": "Tạo tài khoản xem cho con",
-             "command_LOCK_NOW": "Khóa máy ngay", "command_UNLOCK": "Mở khóa", "command_ADD_TIME": "Cộng thêm giờ", "login_locked": "Khóa tài khoản tạm thời"}
+             "child_deleted": "Xóa hồ sơ con", "command_LOCK_NOW": "Khóa máy ngay", "command_UNLOCK": "Mở khóa", "command_ADD_TIME": "Cộng thêm giờ", "login_locked": "Khóa tài khoản tạm thời"}
 
 
 def event_vi(e) -> str:

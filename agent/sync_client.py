@@ -143,6 +143,8 @@ class ServerClient:
 class CommandChannel(threading.Thread):
     """WebSocket thường trực /ws/agent/{device_id}: nhận lệnh khẩn, gửi ack. Tự kết nối lại với backoff."""
 
+    DEAD_AFTER = 55.0   # giây không nhận được gì (kể cả pong) -> coi là kết nối chết, nối lại
+
     def __init__(self, client: ServerClient, on_command, on_state=lambda up: None):
         super().__init__(name="ogk-ws", daemon=True)
         self.client, self.on_command, self.on_state = client, on_command, on_state
@@ -167,19 +169,28 @@ class CommandChannel(threading.Thread):
                         raise PinMismatch("pin")
                 ws.settimeout(20)
                 self.connected, backoff = True, 1.0
+                last_rx = time.monotonic()
                 self.on_state(True)
                 while not self._halt.is_set():
                     try:
-                        msg = json.loads(ws.recv())
+                        raw = ws.recv()
                     except websocket.WebSocketTimeoutException:
+                        if time.monotonic() - last_rx > self.DEAD_AFTER:
+                            raise ConnectionError("ws dead")   # máy chủ im lặng quá lâu: nối lại để không mất lệnh
                         ws.send(json.dumps({"ping": 1}))
                         continue
+                    if not raw:
+                        raise ConnectionError("ws closed")
+                    last_rx = time.monotonic()
+                    msg = json.loads(raw)
                     if "action" in msg:
+                        ok = False
                         try:
-                            self.on_command(msg)
-                        finally:
-                            if msg.get("id") is not None:
-                                ws.send(json.dumps({"ack": msg["id"]}))
+                            ok = bool(self.on_command(msg))
+                        except Exception:
+                            ok = False   # lỗi khi áp dụng: KHÔNG ack, để máy chủ giao lại qua heartbeat
+                        if ok and msg.get("id") is not None:
+                            ws.send(json.dumps({"ack": msg["id"]}))
             except Exception:
                 pass
             finally:
