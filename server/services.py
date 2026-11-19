@@ -93,18 +93,15 @@ def _int(v, lo, hi, label):
 def _domains(lst, label):
     out = []
     for raw in lst or []:
-        d = str(raw).strip().lower()
-        if "://" in d:
-            d = d.split("://", 1)[1]
-        d = d.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0].split(":", 1)[0].rstrip(".")
+        d = str(raw).strip().lower().rstrip(".")
         if d.startswith("*."):
             d = d[2:]
-        if d.startswith("www.") and d.count(".") >= 2:
-            d = d[4:]
         if not d:
             continue
+        if "://" in d or any(ch in d for ch in ("/", "?", "#", ":")):
+            raise ValueError(f"{label}: '{raw}' không phải tên miền hợp lệ (không nhập URL đầy đủ).")
         if not DOMAIN_RE.match(d):
-            raise ValueError(f"{label}: '{raw}' không phải tên miền hợp lệ.")
+            raise ValueError(f"{label}: '{raw}' không phải tên miền hợp lệ (không nhập URL đầy đủ).")
         if d not in out:
             out.append(d)
     return out
