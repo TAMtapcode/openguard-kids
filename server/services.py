@@ -22,6 +22,30 @@ GROUPS = tuple(CATEGORIES)
 DAYS_VI = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"]
 CMD_TTL = {"LOCK_NOW": 600, "UNLOCK": 600, "ADD_TIME": 86400, "WIPE_LOCAL": 7 * 86400, "POLICY_UPDATED": 600}
 
+DOMAIN_FRIENDLY_LABELS = {
+    "khanacademy.org": "Khan Academy (Học trực tuyến)",
+    "scratch.mit.edu": "Scratch (Lập trình cho bé)",
+    "code.org": "Code.org (Học lập trình)",
+    "duolingo.com": "Duolingo (Học ngoại ngữ)",
+    "wikipedia.org": "Wikipedia (Bách khoa toàn thư)",
+    "olm.vn": "OLM (Học & luyện tập)",
+    "hocmai.vn": "Hocmai (Học trực tuyến)",
+    "vnedu.vn": "vnEdu (Cổng học tập & sổ liên lạc)",
+    "youtube.com": "YouTube (Video)",
+    "youtu.be": "YouTube (Video)",
+    "youtubekids.com": "YouTube Kids (Video thiếu nhi)",
+    "tiktok.com": "TikTok (Video ngắn)",
+    "facebook.com": "Facebook (Mạng xã hội)",
+    "fb.com": "Facebook (Mạng xã hội)",
+    "roblox.com": "Roblox (Trò chơi)",
+    "minecraft.net": "Minecraft (Trò chơi)",
+    "poki.com": "Poki (Trò chơi web)",
+    "zingmp3.vn": "Zing MP3 (Nghe nhạc)",
+    "nhaccuatui.com": "Nhaccuatui (Nghe nhạc)",
+    "vnexpress.net": "VnExpress (Báo đọc)",
+    "tuoitre.vn": "Tuổi Trẻ (Báo đọc)",
+}
+
 
 def _display_subject(subject: str, etype: str = "") -> str:
     s = (subject or "").strip()
@@ -29,7 +53,10 @@ def _display_subject(subject: str, etype: str = "") -> str:
         return s
     if etype in ("app_start", "app_stop", "blocked_app") or s.lower().endswith(".exe"):
         return friendly_app_name(s)
-    return s
+    low = s.lower()
+    if low in DOMAIN_FRIENDLY_LABELS:
+        return DOMAIN_FRIENDLY_LABELS[low]
+    return low
 
 
 # ---------------------------------------------------------------- chính sách
@@ -301,7 +328,7 @@ def top_subjects(db: Session, child_id: int, etype: str, days: int = 7, limit: i
     since = now() - days * 86400
     rows = db.execute(select(Event.subject, func.sum(Event.duration_sec), func.count()).where(
         Event.child_id == child_id, Event.type == etype, Event.ts >= since).group_by(Event.subject)
-        .order_by(func.sum(Event.duration_sec).desc(), func.count().desc()).limit(limit)).all()
+        .order_by(func.sum(Event.duration_sec).desc(), func.count().desc()).limit(limit * 2)).all()
     merged: dict[str, dict] = {}
     for raw_s, d, c in rows:
         disp = _display_subject(raw_s, etype)

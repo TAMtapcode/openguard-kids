@@ -22,30 +22,48 @@ from ..models import AuditLog, Child, ChildRequest, Device, EnrollCode, User, We
 from ..security import hash_password, new_enroll_code, login_problem, new_token, password_problem, sha256hex, verify_password
 
 router = APIRouter()
-ACTION_VI = {"policy_change": "Đổi luật", "child_created": "Thêm hồ sơ con", "consent_and_enroll_code": "Đồng ý & tạo mã ghép đôi",
-             "device_enrolled": "Ghép đôi thiết bị", "device_revoked": "Gỡ thiết bị", "request_decided": "Phản hồi yêu cầu của con",
-             "wipe_child_data": "Xóa toàn bộ dữ liệu hoạt động", "viewer_created": "Tạo tài khoản xem cho con",
-             "child_deleted": "Xóa hồ sơ con", "command_LOCK_NOW": "Khóa máy ngay", "command_UNLOCK": "Mở khóa", "command_ADD_TIME": "Cộng thêm giờ", "login_locked": "Khóa tài khoản tạm thời"}
+ACTION_VI = {
+    "policy_change": "Đổi quy định",
+    "child_created": "Thêm hồ sơ của bé",
+    "consent_and_enroll_code": "Xác nhận & tạo mã kết nối máy",
+    "device_enrolled": "Đã kết nối máy của bé",
+    "device_revoked": "Đã ngắt kết nối máy",
+    "request_decided": "Trả lời lời nhắn của bé",
+    "wipe_child_data": "Xóa nhật ký hoạt động",
+    "viewer_created": "Tạo tài khoản xem cho bé",
+    "child_deleted": "Xóa hồ sơ của bé",
+    "command_LOCK_NOW": "Tạm khóa máy cho bé nghỉ",
+    "command_UNLOCK": "Mở khóa cho bé dùng",
+    "command_ADD_TIME": "Thưởng thêm giờ cho bé",
+    "login_locked": "Khóa đăng nhập tạm thời (15 phút)",
+}
 
 
 def event_vi(e) -> str:
     sub = e.subject or ""
     if e.type == "quota_warning":
         if sub.startswith("clock_tamper"):
-            return f"Đồng hồ máy bị chỉnh lệch ({sub.split(':', 1)[-1]}); giờ dùng vẫn tính theo đồng hồ phần cứng"
+            return "Giờ trên đồng hồ máy bị chỉnh lệch; máy vẫn tính đúng giờ thực tế"
         if sub.startswith("grace"):
-            return "Hết giờ: máy cho 60 giây ân hạn để lưu bài"
-        return f"Cảnh báo còn khoảng {sub.replace('min', '')} phút"
+            return "Hết giờ: máy cho 1 phút để bé lưu bài trước khi nghỉ"
+        return f"Nhắc bé sắp hết giờ (còn khoảng {sub.replace('min', '')} phút)"
     if e.type == "locked":
-        return "Máy bị khóa: " + {"manual": "phụ huynh bấm khóa", "quota": "hết hạn mức", "schedule": "ngoài khung giờ"}.get(sub, sub)
+        return "Máy tạm nghỉ: " + {
+            "manual": "bố mẹ bấm tạm khóa",
+            "quota": "hết giờ dùng trong ngày",
+            "schedule": "ngoài khung giờ cho phép",
+        }.get(sub, "tới giờ nghỉ")
     if e.type == "override_granted":
-        return {"parent_add_time": "Phụ huynh cộng thêm giờ", "learn_to_play": "Con đổi giờ học lấy giờ chơi"}.get(sub, sub) + (f" ({e.duration_sec // 60} phút)" if e.duration_sec else "")
-    return "Con gửi yêu cầu" + (f": {sub}" if sub else "")
-
+        mins = f" ({e.duration_sec // 60} phút)" if e.duration_sec else ""
+        return {
+            "parent_add_time": "Bố mẹ cho thêm giờ",
+            "learn_to_play": "Bé đổi giờ chăm học lấy giờ chơi",
+            "parent_unlock": "Bố mẹ mở khóa cho bé dùng thêm",
+        }.get(sub, "Bố mẹ cho thêm giờ") + mins
+    return "Bé gửi lời nhắn cho bố mẹ" + (f" ({sub})" if sub and sub not in ("add-time", "false-block") else "")
 
 
 def _json_only(request: Request):
-    """Chỉ nhận JSON: biểu mẫu HTML của trang lạ không gửi được, còn fetch khác nguồn phải qua CORS preflight."""
     if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
         raise HTTPException(415, "Cần gửi JSON.")
 
@@ -54,7 +72,7 @@ class AuthIn(BaseModel):
     login: str = Field(max_length=255)
     password: str = Field(max_length=200)
     name: str = Field(default="", max_length=100)
-    token: bool = False      # True: trả Bearer token (giao diện ở tên miền khác, ví dụ Netlify) thay cho cookie
+    token: bool = False
 
 
 def user_json(u: User) -> dict:
@@ -78,9 +96,9 @@ def _start_session(request: Request, db: Session, user: User, want_token: bool, 
 @router.post("/api/auth/login", dependencies=[Depends(_json_only)])
 def login(body: AuthIn, request: Request, db: Session = Depends(get_db)):
     ip = client_ip(request)
-    generic = "Tài khoản hoặc mật khẩu không đúng, hoặc tài khoản đang bị khóa tạm thời."
+    generic = "Tài khoản hoặc mật khẩu chưa đúng, hoặc đang tạm khóa đăng nhập."
     if not request.app.state.rl_login.allow(ip):
-        raise HTTPException(429, "Quá nhiều lần thử từ địa chỉ này. Vui lòng đợi một phút.")
+        raise HTTPException(429, "Thử quá nhiều lần. Vui lòng đợi một phút rồi thử lại.")
     user = db.scalar(select(User).where(User.email == body.login.strip().lower()))
     locked = bool(user and user.locked_until > now())
     ok = verify_password(user.pw_hash if user else None, body.password) and user is not None and not locked and not user.disabled
@@ -100,7 +118,7 @@ def login(body: AuthIn, request: Request, db: Session = Depends(get_db)):
 @router.post("/api/auth/register", dependencies=[Depends(_json_only)])
 def register(body: AuthIn, request: Request, db: Session = Depends(get_db)):
     if not request.app.state.rl_login.allow(client_ip(request)):
-        raise HTTPException(429, "Quá nhiều lần thử từ địa chỉ này. Vui lòng đợi một phút.")
+        raise HTTPException(429, "Thử quá nhiều lần. Vui lòng đợi một phút rồi thử lại.")
     login_ = body.login.strip().lower()
     err = login_problem(login_) or password_problem(body.password)
     if not err and db.scalar(select(User.id).where(User.email == login_)):
@@ -122,7 +140,7 @@ def me(request: Request, user: User = Depends(web_session)):
 def logout(request: Request, user: User = Depends(web_session), db: Session = Depends(get_db)):
     s = db.get(WebSession, request.state.session.token_hash)
     if s:
-        db.delete(s)  # hủy phiên phía máy chủ
+        db.delete(s)
         db.commit()
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(SESSION_COOKIE)
@@ -196,7 +214,6 @@ class LocalSetupIn(BaseModel):
 
 @router.post("/api/setup/local")
 def local_setup(body: LocalSetupIn, request: Request, db: Session = Depends(get_db)):
-    """Khởi tạo một lần cho trình cài đặt 'cả hai trên một máy': chỉ nhận từ chính máy này và chỉ khi chưa có tài khoản nào."""
     host = request.client.host if request.client else ""
     if host not in ("127.0.0.1", "::1"):
         raise HTTPException(403, "Chức năng này chỉ dùng được trực tiếp trên máy chủ.")
@@ -226,7 +243,6 @@ def local_setup(body: LocalSetupIn, request: Request, db: Session = Depends(get_
 
 @router.get("/download/OGK-Setup.exe")
 def download_setup(request: Request):
-    """Phụ huynh tải bộ cài ngay từ máy chủ để cài lên máy của con (khỏi cần USB hay tìm trên mạng)."""
     d = request.app.state.settings.data_dir
     f = (Path(d) / "downloads" / "OGK-Setup.exe") if d else None
     if not f or not f.exists():
@@ -236,7 +252,6 @@ def download_setup(request: Request):
 
 @router.websocket("/ws/events")
 async def web_events_ws(ws: WebSocket):
-    """Kênh WebSocket đẩy sự kiện thời gian thực cho giao diện Web (phụ huynh & con), bỏ cảnh phải F5."""
     app = ws.app
     tok = ws.query_params.get("token") or ""
     if not tok:
