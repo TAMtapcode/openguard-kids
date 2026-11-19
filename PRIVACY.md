@@ -1,3 +1,4 @@
+```markdown
 # Quyền riêng tư của Open Guardian Kids
 
 OGK là công cụ **đồng hành**, không phải công cụ theo dõi. Tài liệu này là cam kết bằng văn bản và cũng là bảng kiểm tra cho mọi tính năng mới: nếu một tính năng cần thu thập thứ không nằm trong bảng "Có thu thập" thì không được thêm.
@@ -36,10 +37,13 @@ Lược đồ sự kiện duy nhất được máy chủ chấp nhận: `app_sta
 ## Đồng ý, truy cập, xóa
 
 - **Đồng ý**: phụ huynh phải tích xác nhận trước khi tạo mã ghép đôi; thời điểm đồng ý được ghi cùng thiết bị. Trình cài đặt (OGK-Setup) yêu cầu tích xác nhận trước khi cài trên máy của con. Đối với trẻ em, cần có sự đồng ý của cha mẹ/người giám hộ theo quy định về bảo vệ dữ liệu cá nhân hiện hành (ví dụ Nghị định 13/2023/NĐ-CP). *Đây là mô tả kỹ thuật, không phải tư vấn pháp lý.*
-- **Tự động xóa** dữ liệu hoạt động sau 90 ngày (tác vụ nền 6 giờ/lần).
+- **Tự động xóa** dữ liệu hoạ
+t động sau 90 ngày (tác vụ nền 6 giờ/lần).
 - **Xóa ngay**: nút "Xóa toàn bộ dữ liệu của con tôi" xóa sự kiện, thống kê, yêu cầu trên máy chủ và gửi lệnh xóa bộ nhớ đệm trên máy con. Riêng bộ đếm *tổng thời gian hôm nay* được giữ đến hết ngày để hạn mức không bị đặt lại.
 - **Gỡ cài đặt công khai**: Settings → Apps → Open Guardian Kids (cần quyền quản trị) trả lại DNS gốc, gỡ chính sách trình duyệt và xóa dữ liệu (hoặc giữ lại nếu bạn chọn). Phụ huynh đọc phiên bản dễ hiểu ngay trên bảng điều khiển tại `/privacy`.
 
 ## Bảo vệ dữ liệu
 
 TLS 1.2+ và ghim chứng chỉ giữa Agent và máy chủ; mật khẩu băm Argon2id; bí mật thiết bị mã hóa AES-GCM trong CSDL và bảo vệ bằng DPAPI trên máy con; chính sách ký HMAC-SHA256; khóa không nằm trong mã nguồn (biến môi trường `OGK_MASTER_KEY` hoặc tệp khóa quyền 600).
+
+```

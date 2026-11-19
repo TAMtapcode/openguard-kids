@@ -278,7 +278,8 @@ class Engine:
         ov_left = float(self.store.kv_get("unlock_override_until", "0") or 0) - self.clock.now()
         if not manual and ov_left > 0:
             self.enforcer.reset("ok")
-            self.decision = Decision(state="ok", remaining_sec=ov_left, limit_sec=self.decision.limit_sec)
+            limit = self.policy.limit_sec(dt_local.weekday()) + self.acc.get(day, "bonus")
+            self.decision = Decision(state="ok", remaining_sec=ov_left, limit_sec=limit)
             return
         dec = self.enforcer.evaluate(self.policy, dt_local, self.acc.get(day, "total"), self.acc.get(day, "bonus"), manual)
         self.decision = dec

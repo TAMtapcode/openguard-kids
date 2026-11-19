@@ -1,3 +1,4 @@
+```markdown
 # Hướng dẫn cài đặt Open Guardian Kids (dành cho phụ huynh)
 
 Bạn **không cần biết kỹ thuật**. Cả quá trình khoảng 5 phút và chỉ cần tệp **`OGK-Setup.exe`**.
@@ -46,7 +47,10 @@ Vào **Settings → Apps → Open Guardian Kids → Uninstall** (cần quyền q
 | “**Không tìm thấy máy của bố mẹ** trong mạng” | Kiểm tra máy bố mẹ đang bật và cùng Wi-Fi. Trong trình cài đặt bấm **Nâng cao** và nhập địa chỉ máy bố mẹ (xem ở màn hình cuối Bước 1). |
 | “Máy tại … **không khớp** với mã cài đặt” | Mã sai hoặc không phải của máy này. Tạo mã mới ở bảng điều khiển và nhập lại. Tránh nhầm chữ O với số 0 (mã không chứa chữ I, O, số 0 và 1). |
 | “Mã … **đã hết hạn**” | Mã chỉ dùng một lần trong 10 phút. Bấm **Tạo mã cài đặt** để lấy mã mới. |
-| Điện thoại không mở được địa chỉ | Chắc chắn điện thoại cùng Wi-Fi (không dùng 4G). Nếu Windows hỏi về tường lửa, hãy cho phép trên mạng **Private**. |
+|
+ Điện thoại không mở được địa chỉ | Chắc chắn điện thoại cùng Wi-Fi (không dùng 4G). Nếu Windows hỏi về tường lửa, hãy cho phép trên mạng **Private**. |
 | Trình duyệt luôn cảnh báo “không bảo mật” | Bình thường (xem phần điện thoại). Trên máy bố mẹ thì không còn cảnh báo vì trình cài đặt đã tin cậy chứng chỉ. |
 | Máy con báo “Biểu tượng khay không hiển thị” trên bảng điều khiển | Con đăng xuất rồi đăng nhập lại. Nếu vẫn vậy, khởi động lại máy con. |
 | Quên mật khẩu bảng điều khiển | Hiện chưa có chức năng tự khôi phục. Hãy nhờ người hỗ trợ kỹ thuật (xem README, mục “Giới hạn đã biết”). |
+
+```

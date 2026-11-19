@@ -1,3 +1,4 @@
+```markdown
 # Open Guardian Kids (OGK)
 
 Hệ thống **đồng hành và quản lý thời gian dùng máy tính của trẻ em**: minh bạch tuyệt đối, không theo dõi lén. Chỉ ghi *thời lượng, tên ứng dụng, tên miền*; không chụp màn hình, không keylogger, không đọc tin nhắn. Xem [PRIVACY.md](PRIVACY.md).
@@ -48,7 +49,8 @@ python -m agent run --dev --home ./agent-home      # DNS proxy cổng 5353, khô
 ## Kiểm thử
 
 ```bash
-xvfb-run -a pytest           # ~110 test, ~1 phút (bỏ `xvfb-run -a` trên Windows/Mac: test giao diện cài đặt sẽ tự bỏ qua nếu không có màn hình)
+xvfb-run -a pytest           # ~110 test, ~1 phút (bỏ `xvfb-run -a`
+ trên Windows/Mac: test giao diện cài đặt sẽ tự bỏ qua nếu không có màn hình)
 pytest tests/test_e2e_demos.py -v -s   # D1–D5 end-to-end
 ```
 Xem [docs/DEMO.md](docs/DEMO.md) cho kịch bản D1–D5 và [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) cho giao thức, quyết định thiết kế, mô hình mối đe dọa.
@@ -70,7 +72,8 @@ Xem [docs/DEMO.md](docs/DEMO.md) cho kịch bản D1–D5 và [docs/ARCHITECTURE
 - [ ] **Máy bố mẹ**: “Cài đặt” chạy hết; dịch vụ `OpenGuardKidsServer` Running; lối tắt “Bảng điều khiển OGK” mở được **không cảnh báo chứng chỉ**; điện thoại cùng Wi-Fi mở được địa chỉ LAN (sau cảnh báo một lần).
 - [ ] **Máy con**: dán mã → tìm thấy máy bố mẹ tự động → cài xong; dịch vụ `OpenGuardKids` Running; đăng nhập tài khoản con thấy biểu tượng lá xanh; “Open Guardian Kids” có trong Settings → Apps.
 - [ ] **Một máy dùng chung**: chỉ tài khoản Windows của con bị tính giờ/khóa; tài khoản bố mẹ không bị ảnh hưởng, kể cả khi con vừa bị khóa.
-- [ ] `nslookup tiktok.com` trả `0.0.0.0` khi nhóm mạng xã hội bị chặn; hết hạn mức → popup đếm ngược 60 giây → màn hình khóa toàn màn hình (vẫn có nút Đăng xuất/Tắt máy, tự mở khi được cộng giờ).
+- [ ] `nslookup tiktok.com` t
+rả `0.0.0.0` khi nhóm mạng xã hội bị chặn; hết hạn mức → popup đếm ngược 60 giây → màn hình khóa toàn màn hình (vẫn có nút Đăng xuất/Tắt máy, tự mở khi được cộng giờ).
 - [ ] Tắt `ogk.exe` (tray) trong Task Manager → service mở lại khay trong ≤10 giây; kill service bằng tài khoản thường bị từ chối, bằng Admin thì tự khởi động lại sau 5 giây.
 - [ ] Gỡ ở Settings → Apps: dịch vụ biến mất, DNS về như cũ (`Get-DnsClientServerAddress`), lối tắt và tường lửa được xóa.
 
@@ -83,3 +86,5 @@ Xem [docs/DEMO.md](docs/DEMO.md) cho kịch bản D1–D5 và [docs/ARCHITECTURE
   (ví dụ `192.168.1.10`), mở địa chỉ đó một lần để chấp nhận chứng chỉ, rồi đăng nhập. Trang Netlify gọi API bằng Bearer token, không dùng cookie khác nguồn;
   máy chủ chỉ cho phép CORS từ `*.netlify.app` (đổi bằng biến môi trường `OGK_CORS_ORIGINS`, là một regex). Dữ liệu vẫn nằm trên máy bố mẹ,
   nên trình duyệt phải ở cùng mạng với máy đó.
+
+```
