@@ -142,6 +142,26 @@ def _rollback(s: System, p: Paths, services: list[str], created_dir: bool):
         s.remove_tree(p.install_dir)
 
 
+def _cleanup_stray_agent_on_parent(s: System, p: Paths):
+    """Nếu máy từng cài/chạy Agent của máy con, dừng dịch vụ Agent và khôi phục DNS/DoH/Task Manager."""
+    s.run(["sc.exe", "stop", SERVICE_AGENT])
+    s.run(["sc.exe", "delete", SERVICE_AGENT])
+    s.reg_delete_value(RUN_KEY, "OpenGuardKidsTray")
+    dns_state = p.agent_home / "run" / "dns_prev.json"
+    if s.exists(p.exe):
+        s.run([str(p.exe), "agent", "restore"])
+    elif s.exists(dns_state):
+        try:
+            from agent.winapi import get_platform
+            plat = get_platform()
+            plat.restore_dns(dns_state)
+            plat.set_browser_doh_policy(False)
+            plat.set_taskmgr_policy(False)
+            plat.flush_dns()
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------- máy của bố mẹ
 def install_server(s: System, p: Paths, progress: Progress, copy_files: bool = True) -> dict:
     _need_admin(s)
@@ -150,6 +170,8 @@ def install_server(s: System, p: Paths, progress: Progress, copy_files: bool = T
         if copy_files:
             progress(5, "Đang chép chương trình…")
             copy_program(s, p, SERVICE_SERVER)
+        progress(15, "Đang đảm bảo máy bố mẹ không chạy bộ lọc/khóa của máy con…")
+        _cleanup_stray_agent_on_parent(s, p)
         progress(25, "Đang tạo chứng chỉ bảo mật cho gia đình…")
         s.makedirs(p.server_data)
         s.secure_dir(p.server_data, users_read=False)  # dữ liệu và khóa chỉ SYSTEM/Administrators đọc được
