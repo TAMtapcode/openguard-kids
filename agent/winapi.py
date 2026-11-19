@@ -320,14 +320,13 @@ class WindowsPlatform(Platform):
         import winreg
         subpath = r"Software\Microsoft\Windows\CurrentVersion\Policies\System"
         if not block:
-            # Gỡ bỏ DisableTaskMgr ở mọi SID trong HKEY_USERS khi dừng/gỡ cài đặt
             try:
                 i = 0
                 while True:
                     sid = winreg.EnumKey(winreg.HKEY_USERS, i)
                     i += 1
                     try:
-                        with winreg.OpenKey(winreg.HKEY_USERS, f"{sid}\{subpath}", 0, winreg.KEY_SET_VALUE) as k:
+                        with winreg.OpenKey(winreg.HKEY_USERS, f"{sid}\\{subpath}", 0, winreg.KEY_SET_VALUE) as k:
                             winreg.DeleteValue(k, "DisableTaskMgr")
                     except OSError:
                         pass
@@ -335,10 +334,9 @@ class WindowsPlatform(Platform):
                 pass
             return
 
-        user = (username or self.active_user()).split("\")[-1].strip()
+        user = (username or self.active_user()).split("\\")[-1].strip()
         if not user:
             return
-        # Lấy SID và chỉ áp dụng nếu tài khoản KHÔNG thuộc nhóm Administrators (để Admin vẫn mở Task Manager test được)
         ps = (
             f"$u = '{user.replace(chr(39), chr(39)*2)}'; "
             "$acc = New-Object System.Security.Principal.NTAccount($u); "
@@ -350,7 +348,7 @@ class WindowsPlatform(Platform):
         if not sid or not sid.startswith("S-1-5-21-"):
             return
         try:
-            with winreg.CreateKeyEx(winreg.HKEY_USERS, f"{sid}\{subpath}", 0, winreg.KEY_SET_VALUE) as k:
+            with winreg.CreateKeyEx(winreg.HKEY_USERS, f"{sid}\\{subpath}", 0, winreg.KEY_SET_VALUE) as k:
                 winreg.SetValueEx(k, "DisableTaskMgr", 0, winreg.REG_DWORD, 1)
         except OSError:
             pass
