@@ -319,7 +319,7 @@ class Engine:
                 why, by = "Ứng dụng này nằm trong danh sách chặn.", f"Phụ huynh ({self.policy.set_by})"
             self.event("blocked_app", v.name)
             if self._rate_ok(("app", v.name), 10):
-                self.notify("blocked", "Ứng dụng đã bị đóng", why, subject=disp, raw_subject=v.name,
+                self.notify("blocked", "Ứng dụng đã bị đóng", why, subject=v.name, display_subject=disp,
                             category=label or "Chưa phân loại", by=by, kind_of="app", can_request=True, killed=v.killed)
 
     def _on_dns_block(self, v, qname):

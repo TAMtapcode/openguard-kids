@@ -43,7 +43,7 @@ def event_vi(e) -> str:
     sub = e.subject or ""
     if e.type == "quota_warning":
         if sub.startswith("clock_tamper"):
-            return "Giờ trên đồng hồ máy bị chỉnh lệch; máy vẫn tính đúng giờ thực tế"
+            return "Đồng hồ máy bị chỉnh lệch; máy vẫn tính đúng giờ thực tế"
         if sub.startswith("grace"):
             return "Hết giờ: máy cho 1 phút để bé lưu bài trước khi nghỉ"
         return f"Nhắc bé sắp hết giờ (còn khoảng {sub.replace('min', '')} phút)"
