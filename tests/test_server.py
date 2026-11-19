@@ -12,6 +12,8 @@ from server import services
 from server.models import ChildRequest, Command, DailyUsage, Device, Event, User, now
 from tests.conftest import PW, Parent, bearer
 
+PW_VALID = "Thu-nghiem-10"
+
 
 # ---------------------------------------------------------------- xác thực & phiên
 def test_unauthenticated_api_401_and_spa_served(client):
@@ -32,20 +34,27 @@ def login(c, login_, pw, **kw):
 
 
 def test_register_rejects_short_password(client):
-    r = register(client, "a@b.co", "short", name="A")
-    assert r.status_code == 422 and "8 ký tự" in r.json()["detail"]
+    r = register(client, "a@b.co", "short9ch", name="A")
+    assert r.status_code == 422 and "10 ký tự" in r.json()["detail"]
 
 
 def test_register_with_short_username_and_no_name(client):
-    r = register(client, "  Tester1 ", "Thu-nghiem8")
+    r = register(client, "  Tester1 ", PW_VALID)
     assert r.status_code == 201 and r.json()["user"]["login"] == "tester1" and r.json()["user"]["display_name"] == "tester1"
     assert "token" not in r.json() and client.get("/api/auth/me").status_code == 200
     client.cookies.clear()
-    assert login(client, "tester1", "Thu-nghiem8").status_code == 200
+    assert login(client, "tester1", PW_VALID).status_code == 200
 
 
-@pytest.mark.parametrize("login_,pw,msg", [("ab", "Thu-nghiem8", "không hợp lệ"), ("x y@z", "Thu-nghiem8", "không hợp lệ"),
-                                           ("tester2", "12345678", "dễ đoán"), ("tester3", "aaaabbbb", "dễ đoán")])
+@pytest.mark.parametrize(
+    "login_,pw,msg",
+    [
+        ("ab", PW_VALID, "không hợp lệ"),
+        ("x y@z", PW_VALID, "không hợp lệ"),
+        ("tester2", "1234567890", "dễ đoán"),
+        ("tester3", "aaaaaaaaaa", "dễ đoán"),
+    ],
+)
 def test_register_rejects_bad_login_or_weak_password(client, login_, pw, msg):
     r = register(client, login_, pw)
     assert r.status_code == 422 and msg in r.json()["detail"]
@@ -250,7 +259,7 @@ def test_delete_child_removes_profile_and_everything_linked(app, parent, device_
     cid = parent.add_child()
     other = parent.add_child()
     d = parent.enroll(cid, device_client)
-    parent.post(f"/api/parent/children/{cid}/viewer", json={"username": "beyeu", "password": "Thu-nghiem8"})
+    parent.post(f"/api/parent/children/{cid}/viewer", json={"username": "beyeu", "password": PW_VALID})
     parent.post(f"/api/parent/children/{cid}/command", json={"action": "LOCK_NOW"})
     assert parent.delete(f"/api/parent/children/{cid}").json() == {"ok": True}
     kids = [c["id"] for c in parent.c.get("/api/parent/status").json()["children"]]
