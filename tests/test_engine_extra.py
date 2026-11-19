@@ -77,7 +77,7 @@ def test_learn_to_play_exchange_without_parent_approval(tmp_path):
     assert eng.state_view()["ltp"] == {"enabled": True, "available_min": 5}
     before = eng.decision.limit_sec
     assert eng.exchange(6)[0] == 409
-    assert eng.exchange(5) == (200, {"ok": True, "minutes": 5})
+    assert eng.exchange(5) == (200, {"ok": True, "minutes": 5, "unlocked": True, "groups": ["game"]})
     assert eng.decision.limit_sec == before + 300 and eng.exchange(1)[0] == 409
     assert any(e["type"] == "override_granted" and e["subject"] == "learn_to_play" for e in eng.store.pending_events(100))
 
