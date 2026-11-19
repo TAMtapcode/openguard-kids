@@ -48,6 +48,10 @@ export default function PolicyEditor({ cid, policy, version, categories, onSaved
   const toast = useToast();
   const [s, setS] = useState(() => fromPolicy(policy));
   const [ver, setVer] = useState(version);
+  useEffect(() => {
+    setS(fromPolicy(policy));
+    setVer(version);
+  }, [cid, version]);
   const [hash, setHash] = useState("");
   const set = k => e => setS({ ...s, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const preset = p => setS({ ...s, sched: s.sched.map(() => Array.from({ length: 48 }, (_, i) => (p === "open" ? 1 : p === "closed" ? 0 : i >= 12 && i < 42 ? 1 : 0))) });

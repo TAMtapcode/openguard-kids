@@ -142,6 +142,8 @@ class Engine:
             self.store.kv_set("policy_env", json.dumps(env))
             self.policy = Policy(doc)
             self.dns.flush_cache()
+            if getattr(self, "_dns6", None):
+                self._dns6.flush_cache()
             self.platform.flush_dns()
             self._wake.set()
             self.notify("policy", "Luật mới đã được áp dụng", f"Phiên bản luật {self.policy.version}. Bạn có thể xem ai đã đổi gì trong mục “Nhật ký luật”.")
@@ -417,7 +419,8 @@ class Engine:
                 self.acc.reload()
                 self.notify("wipe", "Dữ liệu đã được xóa", "Bố mẹ đã xóa dữ liệu hoạt động của em trên máy này.")
             elif act == "POLICY_UPDATED":
-                pass
+                if self.server and self.enrolled:
+                    threading.Thread(target=self.sync_once, name="ogk-policy-sync", daemon=True).start()
             else:
                 return False
             if cid is not None:
@@ -650,6 +653,13 @@ class Engine:
         if self.cfg.enable_dns:
             try:
                 self.dns.start()
+                if self.cfg.manage_system_dns and self.cfg.dns_host == "127.0.0.1":
+                    self._dns6 = DnsProxy(self.domain_filter, self.cfg.upstream_dns, "::1", self.cfg.dns_port, lambda: self.policy,
+                                          self._on_dns_block, self._on_dns_query)
+                    try:
+                        self._dns6.start()
+                    except OSError:
+                        self._dns6 = None
                 if self.cfg.manage_system_dns:
                     self._dns_state.parent.mkdir(parents=True, exist_ok=True)
                     self.platform.set_dns_loopback(self._dns_state)
@@ -695,6 +705,8 @@ class Engine:
         self.flush_all()
         if self.cfg.enable_dns:
             self.dns.stop()
+            if getattr(self, "_dns6", None):
+                self._dns6.stop()
         if self.ipc:
             self.ipc.stop()
         self._restore_system()

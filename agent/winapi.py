@@ -258,10 +258,13 @@ class WindowsPlatform(Platform):
 
     def set_dns_loopback(self, state_file: Path) -> bool:
         if not Path(state_file).exists():
-            out = self._ps("Get-DnsClientServerAddress -AddressFamily IPv4 | Select-Object InterfaceIndex,ServerAddresses | ConvertTo-Json -Compress")
+            out = self._ps("Get-DnsClientServerAddress | Select-Object InterfaceIndex,AddressFamily,ServerAddresses | ConvertTo-Json -Compress")
             Path(state_file).write_text(out or "[]", encoding="utf-8")
-        self._ps("Get-NetAdapter | Where-Object Status -eq 'Up' | ForEach-Object "
-                 "{ Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ServerAddresses 127.0.0.1 }")
+        self._ps(
+            "Get-NetAdapter | Where-Object Status -eq 'Up' | ForEach-Object { "
+            "Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ServerAddresses 127.0.0.1 -ErrorAction SilentlyContinue; "
+            "Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ServerAddresses '::1' -ErrorAction SilentlyContinue }"
+        )
         self._set_dns_firewall(True)
         return True
 
@@ -275,13 +278,18 @@ class WindowsPlatform(Platform):
         if isinstance(data, dict):
             data = [data]
         for e in data:
+            idx = int(e["InterfaceIndex"])
             addrs = e.get("ServerAddresses") or []
-            if addrs == ["127.0.0.1"] or not addrs:
-                self._ps(f"Set-DnsClientServerAddress -InterfaceIndex {int(e['InterfaceIndex'])} -ResetServerAddresses")
+            if not addrs or addrs in (["127.0.0.1"], ["::1"]):
+                self._ps(f"Set-DnsClientServerAddress -InterfaceIndex {idx} -ResetServerAddresses -ErrorAction SilentlyContinue")
             else:
-                self._ps(f"Set-DnsClientServerAddress -InterfaceIndex {int(e['InterfaceIndex'])} -ServerAddresses " + ",".join(f"'{a}'" for a in addrs))
+                self._ps(
+                    f"Set-DnsClientServerAddress -InterfaceIndex {idx} -ServerAddresses "
+                    + ",".join(f"'{a}'" for a in addrs)
+                    + " -ErrorAction SilentlyContinue"
+                )
         if not data:
-            self._ps("Get-NetAdapter | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }")
+            self._ps("Get-NetAdapter | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue }")
         sf.unlink(missing_ok=True)
 
     def set_browser_doh_policy(self, block: bool) -> None:

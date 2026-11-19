@@ -220,7 +220,8 @@ class DnsProxy:
 
     # ------------------------------------------------------------- vòng lặp UDP/TCP
     def start(self):
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        fam = socket.AF_INET6 if ":" in self.host else socket.AF_INET
+        self._sock = socket.socket(fam, socket.SOCK_DGRAM)
         self._sock.bind((self.host, self.port))
         self.port = self._sock.getsockname()[1]
         self._sock.settimeout(0.5)
@@ -237,8 +238,12 @@ class DnsProxy:
                 except OSError:
                     pass
 
+        class _TcpSrv(socketserver.ThreadingTCPServer):
+            address_family = fam
+            allow_reuse_address = True
+
         try:
-            self._tcp = socketserver.ThreadingTCPServer((self.host, self.port), TcpHandler)
+            self._tcp = _TcpSrv((self.host, self.port), TcpHandler)
             self._tcp.daemon_threads = True
             threading.Thread(target=self._tcp.serve_forever, name="dns-tcp", daemon=True).start()
         except OSError:
