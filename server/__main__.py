@@ -27,7 +27,7 @@ def main():
         from .security import hash_password, password_problem
         s = load_settings()
         app = create_app(s)
-        pw = getpass.getpass("Mật khẩu (≥8 ký tự): ")
+        pw = getpass.getpass("Mật khẩu (≥10 ký tự): ")
         if password_problem(pw):
             raise SystemExit(password_problem(pw))
         with app.state.SessionLocal() as db:

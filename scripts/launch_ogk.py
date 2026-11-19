@@ -3,8 +3,10 @@
    uninstall            gỡ cài đặt (tự xin quyền quản trị)
    agent-service        dịch vụ trên máy của con (do Windows khởi động)
    server-service       dịch vụ bảng điều khiển trên máy bố mẹ (do Windows khởi động)
+   server-tray          chạy máy chủ ngầm trên máy bố mẹ, chỉ hiện icon khay
    tray                 biểu tượng khay của con
    agent <lệnh>         dòng lệnh: status | hash <tệp> | restore | enroll ..."""
+import os
 import sys
 from pathlib import Path
 
@@ -43,6 +45,11 @@ def main(argv=None) -> int:
     if cmd == "server-service":
         from server.service import run_dispatcher
         run_dispatcher()
+        return 0
+    if cmd == "server-tray":
+        from server.tray_icon import run_with_tray_icon
+        data_dir = Path(rest[0]) if rest else (Path(os.environ.get("PROGRAMDATA", "C:/ProgramData")) / "OpenGuardKidsServer")
+        run_with_tray_icon(data_dir)
         return 0
     if cmd == "tray":
         from agent.tray_ui import main as tray

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from common.schema import CATEGORIES, COMMAND_ACTIONS, DEFAULT_APP_GROUPS, friendly_app_name
 from common.signing import sign
 
-from .models import (AuditLog, Child, ChildRequest, Command, DailyUsage, Device, EnrollCode, Event,
+from .models import (AuditLog, Child, ChildRequest, ChildTask, Command, DailyUsage, Device, EnrollCode, Event,
                      PolicyRow, User, WebSession, now)
 
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
@@ -296,6 +296,7 @@ def delete_child(app, db: Session, child: Child, actor: str, ip: str):
     db.execute(delete(Event).where(Event.child_id == cid))
     db.execute(delete(DailyUsage).where(DailyUsage.child_id == cid))
     db.execute(delete(ChildRequest).where(ChildRequest.child_id == cid))
+    db.execute(delete(ChildTask).where(ChildTask.child_id == cid))
     db.execute(delete(EnrollCode).where(EnrollCode.child_id == cid))
     db.execute(delete(AuditLog).where(AuditLog.child_id == cid))
     db.execute(delete(PolicyRow).where(PolicyRow.child_id == cid))
@@ -395,6 +396,7 @@ def purge_old(db: Session, settings) -> dict:
         "events": db.execute(delete(Event).where(Event.ts < cut)).rowcount,
         "usage": db.execute(delete(DailyUsage).where(DailyUsage.day < day_cut)).rowcount,
         "requests": db.execute(delete(ChildRequest).where(ChildRequest.created_at < cut)).rowcount,
+        "tasks": db.execute(delete(ChildTask).where(ChildTask.created_at < cut)).rowcount,
         "audit": db.execute(delete(AuditLog).where(AuditLog.ts < t - settings.audit_retention_days * 86400)).rowcount,
         "sessions": db.execute(delete(WebSession).where(WebSession.expires_at < t)).rowcount,
         "codes": db.execute(delete(EnrollCode).where(EnrollCode.expires_at < t - 86400)).rowcount,

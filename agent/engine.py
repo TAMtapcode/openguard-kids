@@ -26,11 +26,11 @@ from .sync_client import AuthLost, Offline
 log = logging.getLogger("ogk")
 IGNORED_APPS = {"explorer.exe", "searchhost.exe", "lockapp.exe", "shellexperiencehost.exe", "startmenuexperiencehost.exe",
                 "pythonw.exe", "ogk.exe", "ogk-tray.exe", "applicationframehost.exe", "textinputhost.exe"}
-DOMAIN_WINDOW = 120.0      # giây: hai truy vấn cùng tên miền cách nhau < 120s được coi là đang xem liên tục
+DOMAIN_WINDOW = 120.0         # giây: hai truy vấn cùng tên miền cách nhau < 120s được coi là đang xem liên tục
 BROWSER_ACTIVE_WINDOW = 90.0  # giây: duy trì đếm tên miền gần nhất khi trình duyệt vẫn đang ở tiền cảnh & có thao tác
-RESTORE_BREAK = 300.0      # nghỉ >= 5 phút thì tính lại thời gian dùng liên tục
+RESTORE_BREAK = 300.0         # nghỉ >= 5 phút thì tính lại thời gian dùng liên tục
 EYE_BREAK = 3600.0
-MANUAL_LOCK_MIN = 60       # phút: "Khóa ngay" tự mở sau thời gian này để máy không bao giờ bị kẹt khóa
+MANUAL_LOCK_MIN = 60          # phút: "Khóa ngay" tự mở sau thời gian này để máy không bao giờ bị kẹt khóa
 
 
 class Engine:
@@ -105,12 +105,15 @@ class Engine:
         self._rl[key] = now
         return True
 
+    def _group_bonus_sec(self, day: str, g: str) -> float:
+        return self.acc.get(day, f"gbonus:{g}") + self.acc.get(day, "gbonus")
+
     def group_exhausted(self, g) -> bool:
         p = self.policy
         if not p or g not in p.group_budget:
             return False
         _, day = self._parts()
-        return self.acc.get(day, f"g:{g}") >= p.group_budget[g] + self.acc.get(day, "gbonus")
+        return self.acc.get(day, f"g:{g}") >= p.group_budget[g] + self._group_bonus_sec(day, g)
 
     def is_stale(self) -> bool:
         if not self.policy:
@@ -343,7 +346,6 @@ class Engine:
             self._active_dom_ts = mono
             agg = self._dom_agg.setdefault(sld, [0.0, 0])
             agg[1] += 1
-            # Nếu trình duyệt đang không ở tiền cảnh, vẫn dùng khoảng cách DNS truyền thống làm dự phòng
             fg = (self._foreground() or "").lower()
             if fg not in BROWSER_PROCESSES:
                 last = self._dom_last.get(sld)
@@ -399,8 +401,15 @@ class Engine:
             elif act == "ADD_TIME":
                 m = max(0, min(int(cmd.get("minutes", 15)), 240))
                 self.acc.add(day, "bonus", m * 60)
+                if m > 0:
+                    self.store.kv_set("manual_lock_until", "0")
+                    cur_ov = float(self.store.kv_get("unlock_override_until", "0") or 0)
+                    new_ov = self.clock.now() + m * 60
+                    if new_ov > cur_ov:
+                        self.store.kv_set("unlock_override_until", f"{new_ov:.0f}")
+                    self.enforcer.reset("ok")
                 self.event("override_granted", "parent_add_time", m * 60)
-                self.notify("bonus", "Bố mẹ cộng thêm giờ", f"Em được thêm {m} phút. Dùng cho vui và học nhé!")
+                self.notify("bonus", "Bố mẹ cộng thêm giờ", f"Em được thêm {m} phút. Máy đã sẵn sàng để em dùng!")
             elif act == "WIPE_LOCAL":
                 self.flush_all()
                 self.store.wipe_activity(day)
@@ -431,7 +440,7 @@ class Engine:
         earned = min(self.acc.get(day, "g:education") * float(l.get("earn_ratio", 0.25)), float(l.get("daily_cap_min", 30)) * 60)
         return max(0.0, earned - self.acc.get(day, "ltp_spent"))
 
-    def exchange(self, minutes: int):
+    def exchange(self, minutes: int, target_group: str | None = None):
         with self.lock:
             _, day = self._parts()
             if not (self.policy and self.policy.ltp.get("enabled")):
@@ -442,10 +451,27 @@ class Engine:
                 return 409, {"error": f"Em mới tích lũy được {int(avail // 60)} phút để đổi."}
             self.acc.add(day, "ltp_spent", want)
             self.acc.add(day, "bonus", want)
-            self.acc.add(day, "gbonus", want)
+
+            # Xác định đúng nhóm giải trí cần cộng bù thay vì cộng tràn tất cả các nhóm
+            budgets = (self.policy.group_budget or {}) if self.policy else {}
+            if target_group and target_group in budgets:
+                chosen = [target_group]
+            else:
+                exhausted = [g for g in budgets if self.group_exhausted(g)]
+                chosen = exhausted if exhausted else (["game"] if "game" in budgets else list(budgets.keys())[:1])
+            for grp in chosen:
+                self.acc.add(day, f"gbonus:{grp}", want)
+
+            if want > 0:
+                self.store.kv_set("manual_lock_until", "0")
+                cur_ov = float(self.store.kv_get("unlock_override_until", "0") or 0)
+                new_ov = self.clock.now() + want
+                if new_ov > cur_ov:
+                    self.store.kv_set("unlock_override_until", f"{new_ov:.0f}")
+                self.enforcer.reset("ok")
             self.event("override_granted", "learn_to_play", want)
             self.enforce_now()
-            return 200, {"ok": True, "minutes": minutes}
+            return 200, {"ok": True, "minutes": minutes, "unlocked": self.decision.state != "locked", "groups": chosen}
 
     # ================================================================= đồng bộ máy chủ
     def snapshot(self) -> dict:
@@ -526,7 +552,7 @@ class Engine:
             groups = {}
             if p:
                 for g, b in p.group_budget.items():
-                    groups[g] = {"label": CATEGORIES.get(g, g), "used_sec": int(self.acc.get(day, f"g:{g}")), "budget_sec": int(b + self.acc.get(day, "gbonus"))}
+                    groups[g] = {"label": CATEGORIES.get(g, g), "used_sec": int(self.acc.get(day, f"g:{g}")), "budget_sec": int(b + self._group_bonus_sec(day, g))}
             mood = "sleepy" if self._cont >= EYE_BREAK else ("happy" if total > 0 and edu / total >= 0.5 else "ok")
             return {"child": self.cfg.child_name, "enrolled": self.enrolled, "applies": self.applies, "state": "suspended" if self.suspended else d.state, "reason": d.reason,
                     "lock_text": self._lock_text(d.reason) if d.state == "locked" else None,
@@ -593,7 +619,7 @@ class Engine:
         if method == "POST" and path == "/v1/request":
             return self.send_request(body.get("kind", ""), body.get("subject", ""), body.get("minutes", 0), body.get("message", ""))
         if method == "POST" and path == "/v1/exchange":
-            return self.exchange(int(body.get("minutes", 0)))
+            return self.exchange(int(body.get("minutes", 0)), body.get("group"))
         if method == "GET" and path in ("/v1/requests", "/v1/audit"):
             try:
                 return 200, {"items": self.server.list_requests() if path.endswith("requests") else self.server.audit()}
