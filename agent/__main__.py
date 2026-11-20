@@ -1,3 +1,11 @@
+import os, sys
+os.environ.setdefault("PYTHONUTF8", "1")
+for _s in (sys.stdout, sys.stderr):
+    if _s and hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 """python -m agent <lệnh>
    enroll  --server URL --pin SHA256 --code ABCD2345   Ghép đôi (chạy bằng quyền Administrator)
    run     [--dev]                                     Chạy ở chế độ console (phát triển / chẩn đoán)

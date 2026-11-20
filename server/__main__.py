@@ -1,3 +1,11 @@
+import os, sys
+os.environ.setdefault("PYTHONUTF8", "1")
+for _s in (sys.stdout, sys.stderr):
+    if _s and hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 """python -m server --data-dir ./ogk-data            (khuyến nghị: tự tạo chứng chỉ, mở cổng 8443)
    python -m server [--host 0.0.0.0 --port 8443 --cert certs/server.pem --key certs/server.key | --insecure-http]
    python -m server create-admin EMAIL"""

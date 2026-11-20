@@ -8,6 +8,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:PYTHONUTF8 = "1"
+
 $exe = "C:\Program Files\OpenGuardKids\ogk.exe"
 if (-not (Test-Path $exe)) {
     Write-Host "Khong tim thay $exe. Hay cai dat may con truoc." -ForegroundColor Red

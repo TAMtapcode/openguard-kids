@@ -6,9 +6,28 @@
    server-tray          chạy máy chủ ngầm trên máy bố mẹ, chỉ hiện icon khay
    tray                 biểu tượng khay của con
    agent <lệnh>         dòng lệnh: status | hash <tệp> | restore | enroll ..."""
+import io
 import os
 import sys
 from pathlib import Path
+
+# Fix UnicodeEncodeError ('charmap' / cp1252) khi chạy bản đóng gói --windowed trên Windows
+os.environ.setdefault("PYTHONUTF8", "1")
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+for _name in ("stdout", "stderr"):
+    _st = getattr(sys, _name, None)
+    if _st is None:
+        setattr(sys, _name, open(os.devnull, "w", encoding="utf-8", errors="replace"))
+    elif hasattr(_st, "reconfigure"):
+        try:
+            _st.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    elif hasattr(_st, "buffer"):
+        try:
+            setattr(sys, _name, io.TextIOWrapper(_st.buffer, encoding="utf-8", errors="replace", line_buffering=True))
+        except Exception:
+            pass
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -54,7 +73,6 @@ def main(argv=None) -> int:
     if cmd == "child-resume":
         import subprocess, time
         if sys.platform == "win32":
-            # Khởi động lại service OpenGuardKids nếu đang dừng (không hiện cửa sổ console)
             try:
                 subprocess.run(["sc.exe", "start", "OpenGuardKids"], capture_output=True, creationflags=0x08000000, timeout=10)
             except Exception:

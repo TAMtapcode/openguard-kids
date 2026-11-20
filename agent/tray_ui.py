@@ -528,7 +528,6 @@ class TrayApp:
         nb.add(tab_pin, text="🔑 Mã PIN phụ huynh (Offline)")
         nb.add(tab_acc, text="👤 Tài khoản bố mẹ (Server)")
 
-        # Tab 1: PIN cục bộ
         tk.Label(tab_pin, text="Nhập mã PIN / mật khẩu tắt nhanh của bố mẹ:", bg=CARD, fg=TEXT, font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(4, 6))
         pin_var = tk.StringVar()
         ent_pin = tk.Entry(tab_pin, textvariable=pin_var, show="•", font=("Segoe UI", 14), relief="solid", bd=1, width=24)
@@ -542,7 +541,6 @@ class TrayApp:
             font=("Segoe UI", 8),
         ).pack(anchor="w", pady=(6, 0))
 
-        # Tab 2: Đăng nhập tài khoản bố mẹ
         tk.Label(tab_acc, text="Email hoặc tên đăng nhập của bố mẹ:", bg=CARD, fg=TEXT, font=("Segoe UI", 9, "bold")).pack(anchor="w")
         login_var = tk.StringVar()
         ent_login = tk.Entry(tab_acc, textvariable=login_var, font=("Segoe UI", 11), relief="solid", bd=1, width=34)

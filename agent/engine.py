@@ -673,7 +673,6 @@ class Engine:
         """Xác thực phụ huynh (qua tài khoản Server hoặc mã PIN cục bộ) rồi tắt hoàn toàn OGK trên máy con."""
         if not self._rate_ok("parent_stop_try", 1.5):
             return 429, {"error": "Thao tác quá nhanh, vui lòng đợi 2 giây."}
-        # Refresh config từ đĩa phòng trường hợp mới cập nhật
         fresh_cfg = AgentConfig.load(self.cfg.home)
         if fresh_cfg.parent_pin_hash:
             self.cfg.parent_pin_hash = fresh_cfg.parent_pin_hash
@@ -709,12 +708,10 @@ class Engine:
             except Exception:
                 pass
             if sys.platform == "win32":
-                # Dừng Windows Service trước để SCM không tự restart sau 5s
                 try:
                     subprocess.run(["sc.exe", "stop", "OpenGuardKids"], capture_output=True, creationflags=0x08000000, timeout=10)
                 except Exception:
                     pass
-                # Tắt tiến trình Tray UI của người dùng
                 try:
                     subprocess.run(
                         ["taskkill", "/F", "/IM", "ogk.exe", "/FI", f"PID ne {os.getpid()}"],
