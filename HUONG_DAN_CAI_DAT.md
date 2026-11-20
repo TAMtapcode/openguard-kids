@@ -1,4 +1,3 @@
-```markdown
 # Hướng dẫn cài đặt Open Guardian Kids (dành cho phụ huynh)
 
 Bạn **không cần biết kỹ thuật**. Cả quá trình khoảng 5 phút và chỉ cần tệp **`OGK-Setup.exe`**.
@@ -53,4 +52,3 @@ Vào **Settings → Apps → Open Guardian Kids → Uninstall** (cần quyền q
 | Máy con báo “Biểu tượng khay không hiển thị” trên bảng điều khiển | Con đăng xuất rồi đăng nhập lại. Nếu vẫn vậy, khởi động lại máy con. |
 | Quên mật khẩu bảng điều khiển | Hiện chưa có chức năng tự khôi phục. Hãy nhờ người hỗ trợ kỹ thuật (xem README, mục “Giới hạn đã biết”). |
 
-```

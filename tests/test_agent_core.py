@@ -235,7 +235,7 @@ class FakeUpstream:
 def dns():
     up = FakeUpstream(); pol = Policy(make_doc()); blocks, queries = [], []
     px = DnsProxy(DomainFilter(lambda: pol), [f"127.0.0.1:{up.port}"], port=0, get_policy=lambda: pol,
-                  on_block=lambda v, q: blocks.append(q), on_query=queries.append)
+                  on_block=lambda v, q: blocks.append(q), on_query=queries.append, fallback_upstreams=())
     px.start()
     yield px, up, blocks, queries
     px.stop(); up.close()
@@ -272,7 +272,7 @@ def test_dns_safesearch_cname_rewrite(dns):
 
 def test_dns_exempt_domain_never_blocked_and_servfail_when_upstream_down():
     pol = Policy(make_doc(domains={"blocked": ["x.edu.vn"]}))
-    px = DnsProxy(DomainFilter(lambda: pol), ["127.0.0.1:1"], port=0, get_policy=lambda: pol, timeout=0.3)
+    px = DnsProxy(DomainFilter(lambda: pol), ["127.0.0.1:1"], port=0, get_policy=lambda: pol, timeout=0.3, fallback_upstreams=())
     px.start()
     try:
         assert ask(px, "x.edu.vn").header.rcode == 2   # không bị chặn (miễn chặn) -> chuyển tiếp; upstream chết -> SERVFAIL

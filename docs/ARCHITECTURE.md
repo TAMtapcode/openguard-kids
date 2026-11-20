@@ -1,4 +1,3 @@
-```markdown
 # Kiến trúc Open Guardian Kids
 
 ```
@@ -83,4 +82,3 @@ Mục tiêu: người không rành kỹ thuật cài được trong 5 phút, **k
 - **An toàn khi lỗi**: kiểm tra quyền Admin và xác thực máy chủ *trước* khi đụng vào hệ thống; lỗi giữa chừng hoàn tác (xóa dịch vụ + thư mục vừa chép); mọi thông báo lỗi là tiếng Việt kèm cách xử lý.
 - **Kiểm thử**: `System` là lớp thao tác hệ thống; test dùng `FakeSystem` (ghi lại `sc/netsh/certutil/registry`, và `sc start OpenGuardKidsServer` khởi động server thật trong luồng) nên toàn bộ quy trình cài, ghép đôi, hoàn tác, gỡ được chạy end-to-end. Giao diện tkinter được điều khiển và chụp ảnh dưới Xvfb. Lưu ý kỹ thuật: biến Tk phải được giữ tham chiếu, nếu bị thu gom rác ở luồng nền Tcl sẽ `abort()` cả tiến trình.
 
-```

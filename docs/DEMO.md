@@ -1,4 +1,3 @@
-```markdown
 # Kịch bản nghiệm thu D1–D5
 
 Mỗi kịch bản có **test tự động** (chạy server thật + Agent thật, đồng hồ giả để không phải đợi) và **hướng dẫn thủ công** trên máy Windows.
@@ -22,4 +21,3 @@ pytest tests/test_e2e_demos.py -v -s
 4. **D4**: Rút cáp mạng. Mở `tiktok.com` → vẫn bị chặn. Cắm lại → trong ≤60s trạng thái trên dashboard về "Đang bật", báo cáo không trùng.
 5. **D5**: Bấm "Khóa máy…" → chọn thời gian → "Khóa ngay" trên dashboard (điện thoại) và bấm đồng hồ → màn hình khóa hiện trong vài giây, tự mở khi hết thời gian khóa.
 
-```

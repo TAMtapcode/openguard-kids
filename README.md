@@ -1,4 +1,3 @@
-```markdown
 # Open Guardian Kids (OGK)
 
 Hệ thống **đồng hành và quản lý thời gian dùng máy tính của trẻ em**: minh bạch tuyệt đối, không theo dõi lén. Chỉ ghi *thời lượng, tên ứng dụng, tên miền*; không chụp màn hình, không keylogger, không đọc tin nhắn. Xem [PRIVACY.md](PRIVACY.md).
@@ -87,4 +86,3 @@ rả `0.0.0.0` khi nhóm mạng xã hội bị chặn; hết hạn mức → pop
   máy chủ chỉ cho phép CORS từ `*.netlify.app` (đổi bằng biến môi trường `OGK_CORS_ORIGINS`, là một regex). Dữ liệu vẫn nằm trên máy bố mẹ,
   nên trình duyệt phải ở cùng mạng với máy đó.
 
-```

@@ -11,6 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from common.installcode import make_install_code
@@ -108,7 +109,7 @@ def login(body: AuthIn, request: Request, db: Session = Depends(get_db)):
             if user.failed_attempts >= request.app.state.settings.lockout_attempts:
                 user.locked_until = now() + request.app.state.settings.lockout_minutes * 60
                 user.failed_attempts = 0
-                services.audit(db, user.email, ip, None, "login_locked", "account", "", "khóa 15 phút")
+                services.audit(db, user.email, ip, None, "login_locked", "account", "", f"khóa {request.app.state.settings.lockout_minutes} phút")
             db.commit()
         raise HTTPException(401, generic)
     user.failed_attempts = 0
@@ -127,7 +128,11 @@ def register(body: AuthIn, request: Request, db: Session = Depends(get_db)):
         raise HTTPException(422, err)
     user = User(email=login_, display_name=(body.name.strip() or login_.split("@")[0])[:100], pw_hash=hash_password(body.password), role="parent")
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:  # hai yêu cầu đăng ký cùng tên cùng lúc: tránh lỗi 500
+        db.rollback()
+        raise HTTPException(422, "Tài khoản này đã được đăng ký.")
     return _start_session(request, db, user, body.token, status=201)
 
 

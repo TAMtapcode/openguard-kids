@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import json
 import os
 import uuid
@@ -10,7 +11,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -94,8 +95,14 @@ def enroll(body: EnrollIn, request: Request, db: Session = Depends(get_db)):
     ip = client_ip(request)
     if not request.app.state.rl_enroll.allow(ip):
         raise HTTPException(429, "Thử quá nhiều lần. Vui lòng đợi một phút.")
-    code = db.get(EnrollCode, sha256hex(body.code.strip().upper()))
+    code_hash = sha256hex(body.code.strip().upper())
+    code = db.get(EnrollCode, code_hash)
     if not code or code.used or code.expires_at < now():
+        raise HTTPException(400, "Mã ghép đôi không đúng hoặc đã hết hạn (hiệu lực 10 phút).")
+    claimed = db.execute(update(EnrollCode).where(EnrollCode.code_hash == code_hash, EnrollCode.used == False)  # noqa: E712
+                         .values(used=True)).rowcount
+    if claimed != 1:  # đã có yêu cầu khác dùng mã này trước
+        db.rollback()
         raise HTTPException(400, "Mã ghép đôi không đúng hoặc đã hết hạn (hiệu lực 10 phút).")
     code.used = True
     dev = Device(id=str(uuid.uuid4()), child_id=code.child_id, name=body.device_name or "Máy của con",
@@ -115,7 +122,8 @@ def enroll(body: EnrollIn, request: Request, db: Session = Depends(get_db)):
 @router.post("/api/v1/token/refresh")
 def refresh(body: RefreshIn, request: Request, db: Session = Depends(get_db)):
     dev = db.get(Device, body.device_id)
-    if not dev or dev.status != "active" or not dev.refresh_hash or dev.refresh_hash != sha256hex(body.refresh_token):
+    if (not dev or dev.status != "active" or not dev.refresh_hash
+            or not hmac.compare_digest(dev.refresh_hash, sha256hex(body.refresh_token))):
         raise HTTPException(401, "Refresh token không hợp lệ hoặc thiết bị đã bị gỡ.")
     tokens = _issue_tokens(request, dev)
     db.commit()
@@ -276,8 +284,14 @@ async def agent_ws(ws: WebSocket, device_id: str):
             await app.state.manager.send(device_id, f)
         while True:
             msg = await asyncio.wait_for(ws.receive_json(), timeout=75)
+            if not isinstance(msg, dict):
+                continue
             if "ack" in msg:
-                def _ack(cid=int(msg["ack"])):
+                try:
+                    ack_id = int(msg["ack"])
+                except (TypeError, ValueError):
+                    continue
+                def _ack(cid=ack_id):
                     with app.state.SessionLocal() as db:
                         c = db.get(Command, cid)
                         if c and c.device_id == device_id:

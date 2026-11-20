@@ -1,4 +1,3 @@
-```markdown
 # Quyền riêng tư của Open Guardian Kids
 
 OGK là công cụ **đồng hành**, không phải công cụ theo dõi. Tài liệu này là cam kết bằng văn bản và cũng là bảng kiểm tra cho mọi tính năng mới: nếu một tính năng cần thu thập thứ không nằm trong bảng "Có thu thập" thì không được thêm.
@@ -46,4 +45,3 @@ t động sau 90 ngày (tác vụ nền 6 giờ/lần).
 
 TLS 1.2+ và ghim chứng chỉ giữa Agent và máy chủ; mật khẩu băm Argon2id; bí mật thiết bị mã hóa AES-GCM trong CSDL và bảo vệ bằng DPAPI trên máy con; chính sách ký HMAC-SHA256; khóa không nằm trong mã nguồn (biến môi trường `OGK_MASTER_KEY` hoặc tệp khóa quyền 600).
 
-```

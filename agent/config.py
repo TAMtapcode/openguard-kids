@@ -1,4 +1,4 @@
-"""Cấu hình Agent. Thư mục dữ liệu: %ProgramData%\OpenGuardKids (ACL: chỉ SYSTEM/Administrators được ghi)."""
+r"""Cấu hình Agent. Thư mục dữ liệu: %ProgramData%\OpenGuardKids (ACL: chỉ SYSTEM/Administrators được ghi)."""
 from __future__ import annotations
 
 import hashlib

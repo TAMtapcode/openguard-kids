@@ -176,7 +176,8 @@ class DnsProxy:
     def forward(self, data: bytes) -> bytes:
         for up in self.upstreams:
             host, port = _split(up)
-            if host in ("127.0.0.1", "::1", "localhost"):
+            # Chỉ bỏ qua chính proxy này (tránh vòng lặp). Resolver cục bộ khác cổng (vd. 127.0.0.53) vẫn hợp lệ.
+            if host in ("127.0.0.1", "::1", "localhost") and port == self.port:
                 continue
             try:
                 fam = socket.AF_INET6 if ":" in host else socket.AF_INET

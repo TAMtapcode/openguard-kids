@@ -6,7 +6,6 @@ import webbrowser
 from pathlib import Path
 
 from PIL import Image, ImageDraw
-import pystray
 
 from .runner import run
 
@@ -25,7 +24,7 @@ def _make_icon() -> Image.Image:
     return img
 
 
-def _show_transparency_info(icon: pystray.Icon):
+def _show_transparency_info(icon):
     try:
         icon.notify(TRANSPARENCY_NOTE, "Minh bạch — Máy chủ OGK")
     except Exception:
@@ -33,6 +32,8 @@ def _show_transparency_info(icon: pystray.Icon):
 
 
 def run_with_tray_icon(data_dir: Path, host: str = "0.0.0.0", port: int = 8443, https: bool = True):
+    import pystray  # import muộn: tránh sập khi môi trường không có GUI/tray
+
     stop_evt = threading.Event()
     srv_thread = threading.Thread(
         target=run,
@@ -44,7 +45,7 @@ def run_with_tray_icon(data_dir: Path, host: str = "0.0.0.0", port: int = 8443, 
 
     scheme = "https" if https else "http"
     dashboard_url = f"{scheme}://localhost:{port}"
-    icon: pystray.Icon | None = None
+    icon = None
 
     def _open_dashboard(_icon=None, _item=None):
         try:
