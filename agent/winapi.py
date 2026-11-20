@@ -12,12 +12,11 @@ IS_WIN = sys.platform == "win32"
 CREATE_NO_WINDOW = 0x08000000
 
 SID_SYSTEM, SID_ADMINS, SID_USERS = "*S-1-5-18", "*S-1-5-32-544", "*S-1-5-32-545"
-DNS_BYPASS_FW_RULES = ("OGK Block DoT 853", "OGK Block Public DNS")
+DNS_BYPASS_FW_RULES = ("OGK Block DoT 853", "OGK Block Public DNS", "OGK Allow Upstream DNS", "OGK Allow Upstream DNS TCP")
 PUBLIC_DNS_IPS = "1.1.1.1,1.0.0.1,8.8.8.8,8.8.4.4,9.9.9.9,149.112.112.112,208.67.222.222,208.67.220.220"
 
 
 class Platform:
-    """Bản không phụ thuộc OS: không có phiên người dùng, không khóa thật, không đổi DNS hệ thống."""
     def idle_seconds(self) -> float: return 0.0
     def session_locked(self) -> bool: return False
     def foreground_process(self) -> str | None: return None
@@ -67,14 +66,13 @@ class WindowsPlatform(Platform):
             _fields_ = [("cbSize", wt.UINT), ("dwTime", wt.DWORD)]
         self._LII = LASTINPUTINFO
 
-    # ---- chống bật đè theo từng vai trò (Single Instance Mutex)
     def acquire_single_instance(self, name: str):
         try:
             self.kernel32.SetLastError(0)
             h = self.kernel32.CreateMutexW(None, False, name)
             if not h:
                 return object()
-            if self.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            if self.kernel32.GetLastError() == 183:
                 self.kernel32.CloseHandle(h)
                 return None
             self._mutex_handles.append(h)
@@ -82,7 +80,6 @@ class WindowsPlatform(Platform):
         except Exception:
             return object()
 
-    # ---- hỗ trợ khóa mềm bám mọi Virtual Desktop (chống trick Win+Ctrl+D / chuyển Desktop)
     def _root_hwnd(self, hwnd: int) -> int:
         try:
             GA_ROOT = 2
@@ -92,7 +89,6 @@ class WindowsPlatform(Platform):
             return int(hwnd)
 
     def _get_vdm(self):
-        """Khởi tạo COM IVirtualDesktopManager của Windows 10/11 (không cần thư viện ngoài)."""
         if self._vdm_inited:
             return self._vdm
         self._vdm_inited = True
@@ -108,9 +104,9 @@ class WindowsPlatform(Platform):
                 import uuid
                 return GUID.from_buffer_copy(uuid.UUID(s).bytes_le)
 
-            ole32.CoInitializeEx(None, 2)  # COINIT_APARTMENTTHREADED
-            clsid = make_guid("{AA509086-5CA9-4C25-8F95-589D3C07B48A}")  # CLSID_VirtualDesktopManager
-            iid = make_guid("{A5CD92FF-29BE-454C-8D04-D82879FB3F1B}")    # IID_IVirtualDesktopManager
+            ole32.CoInitializeEx(None, 2)
+            clsid = make_guid("{AA509086-5CA9-4C25-8F95-589D3C07B48A}")
+            iid = make_guid("{A5CD92FF-29BE-454C-8D04-D82879FB3F1B}")
             ptr = ct.c_void_p()
             hr = ole32.CoCreateInstance(ct.byref(clsid), None, 1, ct.byref(iid), ct.byref(ptr))
             if hr == 0 and ptr.value:
@@ -120,7 +116,6 @@ class WindowsPlatform(Platform):
         return self._vdm
 
     def is_window_on_current_desktop(self, hwnd: int) -> bool:
-        """Trả False nếu cửa sổ đang nằm ở Virtual Desktop khác (trẻ vừa bấm Win+Ctrl+D hoặc chuyển Desktop)."""
         vdm = self._get_vdm()
         if not vdm:
             return True
@@ -128,7 +123,7 @@ class WindowsPlatform(Platform):
             ct, wt = self.ct, self.wt
             vtable = ct.cast(vdm, ct.POINTER(ct.POINTER(ct.c_void_p))).contents
             fn_type = ct.WINFUNCTYPE(ct.c_long, ct.c_void_p, wt.HWND, ct.POINTER(wt.BOOL))
-            is_on_cur = fn_type(vtable[3])  # slot 3: IsWindowOnCurrentVirtualDesktop
+            is_on_cur = fn_type(vtable[3])
             out = wt.BOOL(1)
             hr = is_on_cur(vdm, wt.HWND(self._root_hwnd(hwnd)), ct.byref(out))
             if hr == 0:
@@ -151,14 +146,13 @@ class WindowsPlatform(Platform):
             rh = self._root_hwnd(hwnd)
             HWND_TOPMOST = -1
             SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW = 0x0002, 0x0001, 0x0040
-            self.user32.ShowWindow(rh, 9)  # SW_RESTORE
+            self.user32.ShowWindow(rh, 9)
             self.user32.SetWindowPos(rh, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
             self.user32.SetForegroundWindow(rh)
         except Exception:
             pass
 
     def virtual_screen_rect(self) -> tuple[int, int, int, int] | None:
-        """Kích thước toàn bộ màn hình (kể cả máy gắn 2 màn hình)."""
         try:
             x = int(self.user32.GetSystemMetrics(76))
             y = int(self.user32.GetSystemMetrics(77))
@@ -170,7 +164,6 @@ class WindowsPlatform(Platform):
             pass
         return None
 
-    # ---- trạng thái phiên người dùng
     def idle_seconds(self) -> float:
         lii = self._LII()
         lii.cbSize = self.ct.sizeof(lii)
@@ -187,7 +180,6 @@ class WindowsPlatform(Platform):
         return not ok
 
     def foreground_process(self) -> str | None:
-        """Chỉ lấy TÊN tiến trình đang ở tiền cảnh. Không đọc tiêu đề cửa sổ/nội dung (NT2)."""
         import psutil
         hwnd = self.user32.GetForegroundWindow()
         if not hwnd:
@@ -199,7 +191,6 @@ class WindowsPlatform(Platform):
         except Exception:
             return None
 
-    # ---- phía Service (SYSTEM, phiên 0)
     def _console_session(self):
         sid = self.kernel32.WTSGetActiveConsoleSessionId()
         return None if sid == 0xFFFFFFFF else int(sid)
@@ -220,7 +211,7 @@ class WindowsPlatform(Platform):
         return [l.strip() for l in out.splitlines() if l.strip() and l.strip().lower() not in ("administrator", "defaultaccount", "wdagutilityaccount", "guest")]
 
     def lock_session(self) -> None:
-        """Không ngắt/khóa cứng phiên Windows (tránh kẹt máy khi khởi động). Màn hình khóa mềm do khay hiển thị trong phiên của trẻ."""
+        pass
 
     def flush_dns(self) -> None:
         subprocess.run(["ipconfig", "/flushdns"], capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
@@ -231,31 +222,16 @@ class WindowsPlatform(Platform):
         return r.stdout
 
     def _set_dns_firewall(self, block: bool) -> None:
-        """Chặn DNS-over-TLS (cổng 853) và truy vấn trực tiếp tới DNS công cộng ngoài 127.0.0.1."""
         for rule in DNS_BYPASS_FW_RULES:
             subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule}"],
                            capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
         if block:
+            # Chặn DoT (TCP 853); KHÔNG chặn UDP 53 toàn cục vì Windows Firewall outbound block rule
+            # luôn thắng allow rule, dễ làm chính OGK DNS proxy không gửi được truy vấn upstream ra mạng.
             subprocess.run([
                 "netsh", "advfirewall", "firewall", "add", "rule",
                 f"name={DNS_BYPASS_FW_RULES[0]}", "dir=out", "action=block", "protocol=TCP", "remoteport=853",
             ], capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
-            # Chỉ chặn các tiến trình người dùng (không chặn chính service LocalSystem để upstream DNS vẫn hoạt động)
-            exe_path = sys.executable
-            subprocess.run([
-                "netsh", "advfirewall", "firewall", "add", "rule",
-                f"name={DNS_BYPASS_FW_RULES[1]}", "dir=out", "action=block", "protocol=UDP",
-                "remoteport=53", f"remoteip={PUBLIC_DNS_IPS}",
-            ], capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
-            if exe_path:
-                subprocess.run([
-                    "netsh", "advfirewall", "firewall", "add", "rule",
-                    "name=OGK Allow Upstream DNS", "dir=out", "action=allow", "protocol=UDP",
-                    "remoteport=53", f"program={exe_path}",
-                ], capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
-        else:
-            subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", "name=OGK Allow Upstream DNS"],
-                           capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=15)
 
     def set_dns_loopback(self, state_file: Path) -> bool:
         if not Path(state_file).exists():
@@ -281,7 +257,7 @@ class WindowsPlatform(Platform):
         for e in data:
             idx = int(e["InterfaceIndex"])
             addrs = e.get("ServerAddresses") or []
-            if not addrs or addrs in (["127.0.0.1"], ["::1"]):
+            if not addrs or all(a in ("127.0.0.1", "::1") for a in addrs):
                 self._ps(f"Set-DnsClientServerAddress -InterfaceIndex {idx} -ResetServerAddresses -ErrorAction SilentlyContinue")
             else:
                 self._ps(
@@ -294,7 +270,6 @@ class WindowsPlatform(Platform):
         sf.unlink(missing_ok=True)
 
     def set_browser_doh_policy(self, block: bool) -> None:
-        """Chính sách công khai (xem được ở chrome://policy, edge://policy, about:policies): tắt DoH để DNS proxy không bị vượt qua."""
         import winreg
         keys = [
             (r"SOFTWARE\Policies\Google\Chrome", "DnsOverHttpsMode", "off"),
@@ -316,7 +291,6 @@ class WindowsPlatform(Platform):
                 pass
 
     def set_taskmgr_policy(self, block: bool, username: str = "") -> None:
-        """Khóa mở Task Manager (DisableTaskMgr=1) riêng cho tài khoản người dùng thường (không khóa tài khoản Admin)."""
         import winreg
         subpath = r"Software\Microsoft\Windows\CurrentVersion\Policies\System"
         if not block:

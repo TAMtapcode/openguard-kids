@@ -1,9 +1,8 @@
 """DNS proxy cục bộ 127.0.0.1:53 (UDP + TCP).
-Nâng cấp:
 - Chặn theo tên miền & subdomain (trả 0.0.0.0 cho A, :: cho AAAA, NODATA cho HTTPS/SVCB).
 - Cưỡng chế SafeSearch bằng CNAME (Google, Bing, YouTube, DuckDuckGo, Yandex, Brave).
 - Bộ nhớ đệm LRU tôn trọng TTL (giảm độ trễ phân giải DNS và giữ chính xác theo dõi tên miền).
-- Khử nhiễu truy vấn CDN/tài nguyên ngầm khi ghi nhận tên miền để báo cáo chính xác trang web trẻ mở.
+- Có fallback DNS dự phòng khi upstream chính gặp lỗi hoặc timeout để không làm đứt mạng máy con.
 """
 from __future__ import annotations
 
@@ -26,7 +25,6 @@ SAFESEARCH = [
     (re.compile(r"^search\.brave\.com$"), "safesearch.brave.com"),
 ]
 
-# Các hậu tố hạ tầng/telemetry không phải tên miền web người dùng chủ động truy cập
 NOISE_SUFFIXES = (
     ".arpa", ".local", ".internal", ".lan",
     "windowsupdate.com", "microsoft.com", "msftconnecttest.com", "msftncsi.com",
@@ -34,6 +32,8 @@ NOISE_SUFFIXES = (
     "googleapis.com", "gstatic.com", "gvt1.com", "gvt2.com",
     "akadns.net", "akamaiedge.net", "cloudfront.net", "fastly.net", "edgekey.net",
 )
+
+DEFAULT_FALLBACK_UPSTREAMS = ("9.9.9.9", "8.8.4.4", "1.0.0.1")
 
 
 def safesearch_target(host: str) -> str | None:
@@ -54,8 +54,6 @@ def _split(up: str):
 
 
 class _DnsCache:
-    """LRU cache nhỏ gọn cho bản ghi DNS hợp lệ, khóa theo (qname, qtype)."""
-
     def __init__(self, maxsize: int = 1024):
         self.maxsize = maxsize
         self._data: OrderedDict[tuple[str, str], tuple[float, bytes]] = OrderedDict()
@@ -72,7 +70,6 @@ class _DnsCache:
                 self._data.pop(key, None)
                 return None
             self._data.move_to_end(key)
-            # Thay 2 byte đầu bằng Transaction ID của truy vấn mới
             return struct.pack("!H", txid) + payload[2:]
 
     def put(self, key: tuple[str, str], resp: bytes, ttl: int):
@@ -92,8 +89,14 @@ class _DnsCache:
 
 class DnsProxy:
     def __init__(self, domain_filter, upstreams, host="127.0.0.1", port=53, get_policy=lambda: None,
-                 on_block=lambda v, q: None, on_query=lambda q: None, timeout=2.5):
-        self.filter, self.upstreams = domain_filter, list(upstreams)
+                 on_block=lambda v, q: None, on_query=lambda q: None, timeout=2.5,
+                 fallback_upstreams=DEFAULT_FALLBACK_UPSTREAMS):
+        self.filter = domain_filter
+        merged = list(upstreams or [])
+        for fb in (fallback_upstreams or ()):
+            if fb and fb not in merged:
+                merged.append(fb)
+        self.upstreams = merged
         self.host, self.port, self.timeout = host, port, timeout
         self._policy, self.on_block, self.on_query = get_policy, on_block, on_query
         self._sock = self._tcp = None
@@ -105,7 +108,6 @@ class DnsProxy:
     def flush_cache(self):
         self._cache.clear()
 
-    # ------------------------------------------------------------- xử lý một truy vấn
     def handle(self, data: bytes) -> bytes | None:
         try:
             req = DNSRecord.parse(data)
@@ -126,7 +128,6 @@ class DnsProxy:
             elif qtype == "AAAA":
                 reply.add_answer(RR(q.qname, QTYPE.AAAA, rdata=AAAA("::"), ttl=15))
             elif qtype in ("HTTPS", "SVCB"):
-                # Trả NOERROR không bản ghi để trình duyệt không dùng HTTP/3/ECH/DoH hint lách qua
                 pass
             return reply.pack()
 
@@ -172,21 +173,26 @@ class DnsProxy:
             reply.header.rcode = RCODE.SERVFAIL
         return reply.pack()
 
-    # ------------------------------------------------------------- upstream
     def forward(self, data: bytes) -> bytes:
         for up in self.upstreams:
             host, port = _split(up)
+            if host in ("127.0.0.1", "::1", "localhost"):
+                continue
             try:
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                fam = socket.AF_INET6 if ":" in host else socket.AF_INET
+                with socket.socket(fam, socket.SOCK_DGRAM) as s:
                     s.settimeout(self.timeout)
                     s.sendto(data, (host, port))
                     resp, _ = s.recvfrom(4096)
-                if len(resp) > 2 and resp[2] & 0x02:  # TC: thử lại qua TCP để lấy bản đầy đủ
+                if len(resp) > 2 and resp[2] & 0x02:
                     full = self._forward_tcp(data, host, port)
                     if full:
                         return full
                 return resp
             except OSError:
+                full = self._forward_tcp(data, host, port)
+                if full:
+                    return full
                 continue
         try:
             return self._servfail(data)
@@ -218,7 +224,6 @@ class DnsProxy:
             buf += chunk
         return buf
 
-    # ------------------------------------------------------------- vòng lặp UDP/TCP
     def start(self):
         fam = socket.AF_INET6 if ":" in self.host else socket.AF_INET
         self._sock = socket.socket(fam, socket.SOCK_DGRAM)
