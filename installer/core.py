@@ -248,9 +248,36 @@ def _friendly_enroll_error(msg: str) -> str:
     return f"Ghép đôi không thành công: {msg}"
 
 
+def create_child_resume_shortcut(s: System, p: Paths):
+    """Tạo shortcut trên Desktop của máy con để bật lại OGK bất cứ lúc nào mà không hỏi mật khẩu."""
+    if not s.exists(p.exe):
+        return
+    lnk_desktop = p.public_desktop / "Bật Open Guardian Kids.lnk"
+    lnk_menu = p.start_menu / "Bật Open Guardian Kids.lnk"
+    s.makedirs(p.start_menu)
+    ps_lnk = (
+        f'$ws = New-Object -ComObject WScript.Shell; '
+        f'$sc = $ws.CreateShortcut("{lnk_desktop}"); '
+        f'$sc.TargetPath = "{p.exe}"; '
+        f'$sc.Arguments = "child-resume"; '
+        f'$sc.WorkingDirectory = "{p.install_dir}"; '
+        f'$sc.IconLocation = "{p.exe},0"; '
+        f'$sc.Description = "Bật lại Open Guardian Kids"; '
+        f'$sc.Save(); '
+        f'$sc2 = $ws.CreateShortcut("{lnk_menu}"); '
+        f'$sc2.TargetPath = "{p.exe}"; '
+        f'$sc2.Arguments = "child-resume"; '
+        f'$sc2.WorkingDirectory = "{p.install_dir}"; '
+        f'$sc2.IconLocation = "{p.exe},0"; '
+        f'$sc2.Description = "Bật lại Open Guardian Kids"; '
+        f'$sc2.Save()'
+    )
+    s.run(["powershell", "-NoProfile", "-Command", ps_lnk], timeout=20)
+
+
 def install_child(s: System, p: Paths, progress: Progress, install_code: str, server: str | None = None,
                   monitored_users: list[str] | None = None, accept: bool = False, copy_files: bool = True,
-                  allow_insecure: bool = False) -> dict:
+                  allow_insecure: bool = False, parent_pin: str = "") -> dict:
     from agent.bootstrap import enroll
     from agent.config import AgentConfig
     from agent.sync_client import Offline
@@ -281,7 +308,14 @@ def install_child(s: System, p: Paths, progress: Progress, install_code: str, se
             progress(35, "Đang chép chương trình…")
             copy_program(s, p, SERVICE_AGENT)
         progress(55, "Đang kết nối với bố mẹ…")
-        cfg = AgentConfig(home=p.agent_home, allow_insecure=allow_insecure, monitored_users=list(monitored_users or []))
+        from agent.config import hash_pin
+        pin_clean = (parent_pin or "").strip()
+        cfg = AgentConfig(
+            home=p.agent_home,
+            allow_insecure=allow_insecure,
+            monitored_users=list(monitored_users or []),
+            parent_pin_hash=hash_pin(pin_clean) if pin_clean else "",
+        )
         try:
             res = enroll(cfg, url, fp or "", enroll_code)
         except Offline:
@@ -293,6 +327,7 @@ def install_child(s: System, p: Paths, progress: Progress, install_code: str, se
                          "Công cụ đồng hành giúp trẻ dùng máy lành mạnh. Minh bạch: biểu tượng khay luôn hiển thị.")
         s.reg_set(RUN_KEY, "OpenGuardKidsTray", f'"{p.exe}" tray')   # biểu tượng khay chạy khi đăng nhập (luôn hiện diện)
         start_service(s, SERVICE_AGENT, "Open Guardian Kids")
+        create_child_resume_shortcut(s, p)
         register_uninstall(s, p)
         progress(100, "Xong!")
         return {"child": res["child_name"], "server": url}
@@ -320,6 +355,7 @@ def uninstall(s: System, p: Paths, progress: Progress, keep_data: bool = False):
     s.run(["certutil", "-delstore", "Root", socket.gethostname()])
     s.remove_file(p.public_desktop / "Bảng điều khiển OGK.url")
     s.remove_file(p.public_desktop / "Bảng điều khiển OGK.lnk")
+    s.remove_file(p.public_desktop / "Bật Open Guardian Kids.lnk")
     s.remove_file(p.install_dir / "open_dashboard.cmd")
     s.remove_tree(p.start_menu)
     s.run(["ipconfig", "/flushdns"])

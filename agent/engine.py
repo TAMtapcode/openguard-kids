@@ -635,7 +635,106 @@ class Engine:
                 return 503, {"error": "Chưa kết nối được máy chủ."}
             except AttributeError:
                 return 503, {"error": "Máy chưa được ghép đôi."}
+        if method == "POST" and path == "/v1/parent-stop":
+            return self.parent_stop_agent(
+                pin=(body.get("pin") or "").strip(),
+                login=(body.get("login") or "").strip(),
+                password=(body.get("password") or ""),
+            )
         return 404, {"error": "not found"}
+
+    def _verify_parent_on_server(self, login: str, password: str) -> tuple[bool, str]:
+        if not self.server or not self.cfg.server_url:
+            return False, "Chưa cấu hình địa chỉ máy chủ của bố mẹ."
+        try:
+            r = self.server._send(
+                "POST",
+                "/api/auth/login",
+                json={"login": login, "password": password, "token": True},
+                auth=False,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                role = (data.get("user") or {}).get("role", "")
+                if role in ("parent", "admin"):
+                    return True, ""
+                return False, "Tài khoản này không phải tài khoản phụ huynh."
+            try:
+                detail = r.json().get("detail")
+            except Exception:
+                detail = None
+            return False, detail or "Tài khoản hoặc mật khẩu bố mẹ không đúng."
+        except Offline:
+            return False, "Không kết nối được máy chủ bố mẹ (mất mạng). Hãy dùng mã PIN phụ huynh đã cài đặt."
+        except Exception as e:
+            return False, f"Lỗi xác thực máy chủ: {e}"
+
+    def parent_stop_agent(self, pin: str = "", login: str = "", password: str = ""):
+        """Xác thực phụ huynh (qua tài khoản Server hoặc mã PIN cục bộ) rồi tắt hoàn toàn OGK trên máy con."""
+        if not self._rate_ok("parent_stop_try", 1.5):
+            return 429, {"error": "Thao tác quá nhanh, vui lòng đợi 2 giây."}
+        # Refresh config từ đĩa phòng trường hợp mới cập nhật
+        fresh_cfg = AgentConfig.load(self.cfg.home)
+        if fresh_cfg.parent_pin_hash:
+            self.cfg.parent_pin_hash = fresh_cfg.parent_pin_hash
+
+        verified = False
+        if login and password:
+            ok, err = self._verify_parent_on_server(login, password)
+            if not ok:
+                return 401, {"error": err}
+            verified = True
+        elif pin:
+            from .config import verify_pin
+            if not self.cfg.parent_pin_hash:
+                return 400, {"error": "Máy này chưa đặt mã PIN phụ huynh. Vui lòng chuyển sang tab 'Tài khoản bố mẹ' để đăng nhập."}
+            if not verify_pin(pin, self.cfg.parent_pin_hash):
+                return 401, {"error": "Mã PIN phụ huynh không đúng."}
+            verified = True
+        else:
+            return 422, {"error": "Vui lòng nhập mã PIN phụ huynh hoặc đăng nhập tài khoản bố mẹ."}
+
+        if not verified:
+            return 401, {"error": "Xác thực phụ huynh thất bại."}
+
+        log.info("Parent authenticated stop requested on child machine.")
+        self.event("override_granted", "parent_local_stop", 0)
+        self.flush_all()
+
+        def _shutdown_all():
+            import os, signal, subprocess, sys
+            time.sleep(0.5)
+            try:
+                self._restore_system()
+            except Exception:
+                pass
+            if sys.platform == "win32":
+                # Dừng Windows Service trước để SCM không tự restart sau 5s
+                try:
+                    subprocess.run(["sc.exe", "stop", "OpenGuardKids"], capture_output=True, creationflags=0x08000000, timeout=10)
+                except Exception:
+                    pass
+                # Tắt tiến trình Tray UI của người dùng
+                try:
+                    subprocess.run(
+                        ["taskkill", "/F", "/IM", "ogk.exe", "/FI", f"PID ne {os.getpid()}"],
+                        capture_output=True,
+                        creationflags=0x08000000,
+                        timeout=8,
+                    )
+                except Exception:
+                    pass
+            try:
+                self.stop()
+            except Exception:
+                pass
+            try:
+                os.kill(os.getpid(), signal.SIGTERM)
+            except Exception:
+                os._exit(0)
+
+        threading.Thread(target=_shutdown_all, name="ogk-parent-stop", daemon=True).start()
+        return 200, {"ok": True, "message": "Đã xác thực phụ huynh. Đang tắt Open Guardian Kids và khôi phục mạng..."}
 
     # ================================================================= vòng đời
     def _restore_system(self):

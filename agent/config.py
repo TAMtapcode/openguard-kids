@@ -1,8 +1,11 @@
-"""Cấu hình Agent. Thư mục dữ liệu: %ProgramData%\\OpenGuardKids (ACL: chỉ SYSTEM/Administrators được ghi)."""
+"""Cấu hình Agent. Thư mục dữ liệu: %ProgramData%\OpenGuardKids (ACL: chỉ SYSTEM/Administrators được ghi)."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
+import secrets
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -15,6 +18,22 @@ def default_home() -> Path:
     if env:
         return Path(env)
     return Path(os.environ.get("PROGRAMDATA", "C:/ProgramData")) / "OpenGuardKids"
+
+
+def hash_pin(pin: str, salt: str | None = None) -> str:
+    salt = salt or secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), bytes.fromhex(salt), 120_000)
+    return f"pbkdf2_sha256${salt}${dk.hex()}"
+
+
+def verify_pin(pin: str, stored: str) -> bool:
+    if not pin or not stored or "$" not in stored:
+        return False
+    parts = stored.split("$")
+    if len(parts) != 3 or parts[0] != "pbkdf2_sha256":
+        return False
+    expected = hash_pin(pin, parts[1])
+    return hmac.compare_digest(expected, stored)
 
 
 @dataclass
@@ -38,6 +57,7 @@ class AgentConfig:
     enable_dns: bool = True
     block_taskmgr: bool = True        # Chặn mở Task Manager trên tài khoản con (bỏ qua nếu là Admin hoặc --dev)
     monitored_users: list = field(default_factory=list)  # rỗng = mọi tài khoản Windows trên máy; ngược lại chỉ các tài khoản này
+    parent_pin_hash: str = ""         # Mã PIN/mật khẩu cục bộ của bố mẹ để tắt nhanh trên máy con
 
     @property
     def db_path(self) -> Path: return self.home / "agent.db"

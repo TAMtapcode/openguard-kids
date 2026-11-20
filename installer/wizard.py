@@ -135,13 +135,14 @@ class Wizard:
         tk = self.tk
         self.clear()
         self.heading("Cài đặt trên máy của con", "Nhập mã cài đặt từ bảng điều khiển của bố mẹ (mục “Thêm máy tính của con”).")
-        self.code_var, self.ok_var, self.server_var, self.scope_var, self.user_var = self.sv(), self.bv(), self.sv(), self.sv("all"), self.sv()
+        self.code_var, self.pin_var, self.ok_var, self.server_var, self.scope_var, self.user_var = self.sv(), self.sv(), self.bv(), self.sv(), self.sv("all"), self.sv()
         e = self.field(self.body, "Mã cài đặt (16 ký tự)", self.code_var, width=28)
         e.configure(font=("Consolas", 16), width=24)
         e.focus_set()
         self.code_msg = self.label(self.body, "", 10, color=MUTED)
-        self.code_msg.pack(anchor="w", pady=(4, 8))
-        self.check(CONSENT, self.ok_var, self.refresh_child).pack(anchor="w", pady=(6, 4))
+        self.code_msg.pack(anchor="w", pady=(4, 6))
+        self.field(self.body, "Mã PIN / mật khẩu tắt nhanh của bố mẹ (dùng khi muốn tắt trên máy con kể cả lúc mất mạng)", self.pin_var, show="•", width=26)
+        self.check(CONSENT, self.ok_var, self.refresh_child).pack(anchor="w", pady=(8, 4))
         self.adv_open = False
         self.adv_link = self.label(self.body, "▸ Nâng cao", 10, color=GREEN)
         self.adv_link.pack(anchor="w", pady=(10, 0))
@@ -184,9 +185,9 @@ class Wizard:
 
     def start_child(self):
         users = [self.user_var.get().strip()] if self.scope_var.get() == "one" and self.user_var.get().strip() else []
-        server, code, ok = self.server_var.get().strip() or None, self.code_var.get(), self.ok_var.get()
+        server, code, pin, ok = self.server_var.get().strip() or None, self.code_var.get(), self.pin_var.get().strip(), self.ok_var.get()
         self.run_task("Đang cài đặt trên máy của con…",
-                      lambda pr: core.install_child(self.s, self.p, pr, code, server, users, ok), self.done_child, retry=self.show_child)
+                      lambda pr: core.install_child(self.s, self.p, pr, code, server, users, ok, parent_pin=pin), self.done_child, retry=self.show_child)
 
     # ------------------------------------------------------------- chạy tác vụ + tiến độ
     def run_task(self, title, fn, on_done, retry=None):
@@ -291,7 +292,7 @@ def silent(args) -> int:
             info = core.install_server(s, p, pr)
             print("Bảng điều khiển:", info["lan_url"])
         elif args.mode == "child":
-            info = core.install_child(s, p, pr, args.code, args.server, [u for u in (args.users or "").split(",") if u], accept=args.accept)
+            info = core.install_child(s, p, pr, args.code, args.server, [u for u in (args.users or "").split(",") if u], accept=args.accept, parent_pin=args.parent_pin or "")
             print("Đã cài cho", info["child"])
         elif args.mode == "uninstall":
             core.uninstall(s, p, pr, args.keep_data)
@@ -309,6 +310,7 @@ def main(argv=None) -> int:
     ap.add_argument("--silent", action="store_true", help="Cài không giao diện (dành cho IT)")
     ap.add_argument("--mode", choices=["parent", "child", "uninstall"])
     ap.add_argument("--code", default="", help="Mã cài đặt 16 ký tự")
+    ap.add_argument("--parent-pin", default="", help="Mã PIN phụ huynh để tắt nhanh trên máy con")
     ap.add_argument("--server", help="Địa chỉ máy bố mẹ (mặc định: tự tìm)")
     ap.add_argument("--users", help="Chỉ giới hạn các tài khoản Windows này (phân cách bằng dấu phẩy)")
     ap.add_argument("--accept", action="store_true", help="Xác nhận bạn là cha/mẹ/người giám hộ và đồng ý")

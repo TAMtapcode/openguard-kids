@@ -160,6 +160,8 @@ class TrayApp:
             pystray.MenuItem("Xin thêm giờ", lambda: self.root.after(0, lambda: self.open_window(1))),
             pystray.MenuItem("Đổi điểm học lấy giờ chơi", lambda: self.root.after(0, self.open_exchange_popup)),
             pystray.MenuItem("Open Guardian Kids làm gì?", lambda: self.root.after(0, self.show_about)),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("🛑 Tắt OGK (Phụ huynh)...", lambda: self.root.after(0, self.open_parent_stop_dialog)),
         )
         self.icon = pystray.Icon("OGK", self._image(GREEN), "Open Guardian Kids", menu)
         self.icon.run_detached()
@@ -436,6 +438,7 @@ class TrayApp:
         tk.Button(row, text="🙋 Xin thêm 15 phút", bg=GREEN, fg="white", command=self._lock_request, **btn).pack(side="left", padx=6)
         tk.Button(row, text="🔄 Đăng xuất", bg="white", fg=TEXT, command=lambda: self.platform_power("logoff"), **btn).pack(side="left", padx=6)
         tk.Button(row, text="⏻ Tắt máy", bg="white", fg=TEXT, command=lambda: self.platform_power("shutdown"), **btn).pack(side="left", padx=6)
+        tk.Button(row, text="🛑 Tắt OGK (Phụ huynh)", bg=RED, fg="white", command=self.open_parent_stop_dialog, **btn).pack(side="left", padx=6)
 
         self.lock_status = tk.Label(box, bg=bg, fg="#f5c65c", font=("Segoe UI", 11, "bold"))
         self.lock_status.pack(pady=4)
@@ -477,6 +480,106 @@ class TrayApp:
             subprocess.Popen(args, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError:
             pass
+
+    def open_parent_stop_dialog(self):
+        """Hộp thoại xác thực phụ huynh (mã PIN cục bộ hoặc tài khoản Server bố mẹ) để tắt nhanh OGK trên máy con."""
+        from tkinter import ttk
+        tk = self.tk
+        if getattr(self, "_stop_win", None) and self._stop_win.winfo_exists():
+            self._stop_win.lift()
+            return
+        w = self._stop_win = tk.Toplevel(self.root)
+        w.title("Xác thực phụ huynh · Tắt Open Guardian Kids")
+        w.configure(bg=BG, padx=22, pady=18)
+        w.geometry("460x390")
+        w.resizable(False, False)
+        w.attributes("-topmost", True)
+        try:
+            w.update_idletasks()
+            self.platform.bring_window_to_front(w.winfo_id())
+        except Exception:
+            pass
+
+        tk.Label(w, text="🛑 Tắt tạm thời Open Guardian Kids", bg=BG, fg=RED, font=("Segoe UI", 14, "bold")).pack(anchor="w")
+        tk.Label(
+            w,
+            text="Chỉ phụ huynh mới có quyền tắt. Sau khi tắt, có thể bấm shortcut “Bật Open Guardian Kids” ngoài Desktop để bật lại ngay (không hỏi mật khẩu).",
+            bg=BG,
+            fg=MUTED,
+            wraplength=415,
+            justify="left",
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(4, 10))
+
+        style = ttk.Style(w)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure("Stop.TNotebook", background=BG, borderwidth=0)
+        style.configure("Stop.TNotebook.Tab", background=GREEN_SOFT, foreground=TEXT, padding=(12, 6), font=("Segoe UI", 9, "bold"))
+        style.map("Stop.TNotebook.Tab", background=[("selected", GREEN)], foreground=[("selected", "white")])
+
+        nb = ttk.Notebook(w, style="Stop.TNotebook")
+        nb.pack(fill="both", expand=True)
+
+        tab_pin = tk.Frame(nb, bg=CARD, padx=14, pady=12)
+        tab_acc = tk.Frame(nb, bg=CARD, padx=14, pady=12)
+        nb.add(tab_pin, text="🔑 Mã PIN phụ huynh (Offline)")
+        nb.add(tab_acc, text="👤 Tài khoản bố mẹ (Server)")
+
+        # Tab 1: PIN cục bộ
+        tk.Label(tab_pin, text="Nhập mã PIN / mật khẩu tắt nhanh của bố mẹ:", bg=CARD, fg=TEXT, font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(4, 6))
+        pin_var = tk.StringVar()
+        ent_pin = tk.Entry(tab_pin, textvariable=pin_var, show="•", font=("Segoe UI", 14), relief="solid", bd=1, width=24)
+        ent_pin.pack(anchor="w", ipady=5)
+        ent_pin.focus_set()
+        tk.Label(
+            tab_pin,
+            text="Hoạt động ngay cả khi mất mạng Wi-Fi / máy chủ bố mẹ đang tắt.",
+            bg=CARD,
+            fg=MUTED,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(6, 0))
+
+        # Tab 2: Đăng nhập tài khoản bố mẹ
+        tk.Label(tab_acc, text="Email hoặc tên đăng nhập của bố mẹ:", bg=CARD, fg=TEXT, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        login_var = tk.StringVar()
+        ent_login = tk.Entry(tab_acc, textvariable=login_var, font=("Segoe UI", 11), relief="solid", bd=1, width=34)
+        ent_login.pack(anchor="w", ipady=4, pady=(2, 8))
+
+        tk.Label(tab_acc, text="Mật khẩu tài khoản bố mẹ:", bg=CARD, fg=TEXT, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        pw_var = tk.StringVar()
+        ent_pw = tk.Entry(tab_acc, textvariable=pw_var, show="•", font=("Segoe UI", 11), relief="solid", bd=1, width=34)
+        ent_pw.pack(anchor="w", ipady=4, pady=(2, 0))
+
+        status_lbl = tk.Label(w, text="", bg=BG, fg=RED, font=("Segoe UI", 9, "bold"), wraplength=415, justify="left")
+        status_lbl.pack(anchor="w", pady=(8, 6))
+
+        def do_stop(_evt=None):
+            idx = nb.index(nb.select())
+            payload = {"pin": pin_var.get().strip()} if idx == 0 else {"login": login_var.get().strip(), "password": pw_var.get()}
+            status_lbl.config(text="Đang xác thực phụ huynh...", fg=MUTED)
+            w.update_idletasks()
+            try:
+                code, res = self.ipc.call("POST", "/v1/parent-stop", payload, timeout=10)
+                if code == 200:
+                    status_lbl.config(text="✅ Đã xác thực! Đang tắt Open Guardian Kids...", fg=GREEN)
+                    self._dev_bypass = True
+                    self._destroy_lock_screen()
+                    w.after(400, self.root.destroy)
+                else:
+                    status_lbl.config(text=res.get("error", "Xác thực thất bại."), fg=RED)
+            except Exception as ex:
+                status_lbl.config(text=f"Không liên lạc được với dịch vụ OGK: {ex}", fg=RED)
+
+        ent_pin.bind("<Return>", do_stop)
+        ent_pw.bind("<Return>", do_stop)
+
+        btn_row = tk.Frame(w, bg=BG)
+        btn_row.pack(fill="x", pady=(4, 0))
+        tk.Button(btn_row, text="Hủy", bg=CARD, fg=TEXT, font=("Segoe UI", 10, "bold"), relief="flat", padx=16, pady=7, cursor="hand2", command=w.destroy).pack(side="right", padx=(6, 0))
+        tk.Button(btn_row, text="🛑 Xác nhận tắt OGK", bg=RED, fg="white", font=("Segoe UI", 10, "bold"), relief="flat", padx=16, pady=7, cursor="hand2", command=do_stop).pack(side="right")
 
     def show_about(self):
         self.popup("Open Guardian Kids làm gì?", ABOUT)
@@ -576,13 +679,27 @@ class TrayApp:
         tk.Label(used_card, text="📋 Hôm nay bé đã dùng", bg=CARD, fg=TEXT, font=("Segoe UI", 11, "bold"), anchor="w").pack(fill="x", pady=(0, 6))
         self.lst = tk.Text(used_card, height=9, state="disabled", relief="flat", bg=BG, fg=TEXT, font=("Segoe UI", 10), padx=10, pady=8)
         self.lst.pack(fill="both", expand=True)
+        foot_row = tk.Frame(f, bg=BG)
+        foot_row.pack(fill="x", pady=(6, 0))
         tk.Label(
-            f,
-            text="Cần giúp đỡ khẩn cấp? Gọi Tổng đài 111 (miễn phí) · Không chụp màn hình, không đọc tin nhắn.",
+            foot_row,
+            text="Tổng đài 111 (miễn phí) · Không chụp màn hình.",
             bg=BG,
             fg=MUTED,
             font=("Segoe UI", 8),
-        ).pack(pady=(6, 0))
+        ).pack(side="left")
+        tk.Button(
+            foot_row,
+            text="🛑 Tắt OGK (Phụ huynh)",
+            bg=RED_SOFT,
+            fg=RED,
+            font=("Segoe UI", 8, "bold"),
+            relief="flat",
+            padx=8,
+            pady=2,
+            cursor="hand2",
+            command=self.open_parent_stop_dialog,
+        ).pack(side="right")
 
     def draw_plant(self, mood):
         c = self.canvas

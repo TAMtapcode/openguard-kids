@@ -51,6 +51,29 @@ def main(argv=None) -> int:
         data_dir = Path(rest[0]) if rest else (Path(os.environ.get("PROGRAMDATA", "C:/ProgramData")) / "OpenGuardKidsServer")
         run_with_tray_icon(data_dir)
         return 0
+    if cmd == "child-resume":
+        import subprocess, time
+        if sys.platform == "win32":
+            # Khởi động lại service OpenGuardKids nếu đang dừng (không hiện cửa sổ console)
+            try:
+                subprocess.run(["sc.exe", "start", "OpenGuardKids"], capture_output=True, creationflags=0x08000000, timeout=10)
+            except Exception:
+                pass
+            time.sleep(0.6)
+        from agent.tray_ui import main as tray
+        tray()
+        return 0
+    if cmd == "set-parent-pin":
+        from agent.config import AgentConfig, hash_pin
+        pin = rest[0].strip() if rest else ""
+        if not pin:
+            print("Cách dùng: ogk.exe set-parent-pin <MA_PIN_MOI>")
+            return 2
+        cfg = AgentConfig.load()
+        cfg.parent_pin_hash = hash_pin(pin)
+        cfg.save()
+        print("Đã cập nhật mã PIN phụ huynh thành công.")
+        return 0
     if cmd == "tray":
         from agent.tray_ui import main as tray
         tray()
