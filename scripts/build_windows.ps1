@@ -10,8 +10,13 @@ Remove-Item -Recurse -Force dist, build -ErrorAction SilentlyContinue
 
 # 0) Giao diện web React (cần Node.js 20+): web\dist được nhúng vào máy chủ
 Push-Location web
-npm ci
-if ($LASTEXITCODE -ne 0) { throw "npm ci thất bại." }
+if (Test-Path package-lock.json) {
+    npm ci
+    if ($LASTEXITCODE -ne 0) { throw "npm ci thất bại." }
+} else {
+    npm install
+    if ($LASTEXITCODE -ne 0) { throw "npm install thất bại." }
+}
 npm run build
 if ($LASTEXITCODE -ne 0) { throw "Build giao diện web thất bại." }
 Pop-Location
