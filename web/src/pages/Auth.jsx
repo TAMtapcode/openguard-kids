@@ -29,8 +29,8 @@ function AuthForm({ mode }) {
         {err && <p className="error" role="alert">{err}</p>}
         <label>Email hoặc tên đăng nhập<input value={f.login} onChange={set("login")} required autoComplete="username" autoFocus /></label>
         {reg && <label>Tên hiển thị (không bắt buộc)<input value={f.name} onChange={set("name")} maxLength={100} /></label>}
-        <label>Mật khẩu{reg && " (tối thiểu 8 ký tự)"}
-          <input type="password" value={f.password} onChange={set("password")} required minLength={reg ? 8 : undefined}
+        <label>Mật khẩu{reg && " (tối thiểu 10 ký tự)"}
+          <input type="password" value={f.password} onChange={set("password")} required minLength={reg ? 10 : undefined}
             autoComplete={reg ? "new-password" : "current-password"} /></label>
         <button className="btn primary" disabled={busy}>{busy ? "Đang xử lý…" : reg ? "Tạo tài khoản" : "Đăng nhập"}</button>
       </div>

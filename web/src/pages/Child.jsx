@@ -94,8 +94,8 @@ function Devices({ o, reload }) {
       <h3>Tài khoản để con xem báo cáo</h3>
       <form className="row wrap" onSubmit={addViewer}>
         <label>Tên đăng nhập<input value={viewer.username} onChange={e => setViewer({ ...viewer, username: e.target.value })} required minLength={3} /></label>
-        <label>Mật khẩu (≥8 ký tự)<input type="password" value={viewer.password} onChange={e => setViewer({ ...viewer, password: e.target.value })}
-          required minLength={8} autoComplete="new-password" /></label>
+        <label>Mật khẩu (≥10 ký tự)<input type="password" value={viewer.password} onChange={e => setViewer({ ...viewer, password: e.target.value })}
+          required minLength={10} autoComplete="new-password" /></label>
         <button className="btn ghost">Tạo tài khoản xem</button>
       </form>
     </section>
